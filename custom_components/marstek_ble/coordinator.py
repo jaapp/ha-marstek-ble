@@ -55,8 +55,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekDa
             mode=bluetooth.BluetoothScanningMode.ACTIVE,
             connectable=True,
         )
+        self.update_interval = timedelta(seconds=UPDATE_INTERVAL_FAST)
         self._device = device
-        self._protocol = MarstekProtocol()
+        self._protocol = MarstekProtocol
         self.data = MarstekData()
         self._connected = False
         self._fast_poll_count = 0

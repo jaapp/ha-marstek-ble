@@ -42,6 +42,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device=ble_device,
     )
 
+    # Activate coordinator polling
+    await coordinator.async_start()
+
     # Start coordinator
     await coordinator.async_start_notify()
 
@@ -58,6 +61,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
 
     coordinator: MarstekDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    await coordinator.async_stop()
     await coordinator.async_stop_notify()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
