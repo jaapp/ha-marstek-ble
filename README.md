@@ -15,10 +15,15 @@ Home Assistant integration for Marstek Venus E energy storage systems via Blueto
 
 ### Via HACS (Recommended)
 
-1. Add this repository as a custom repository in HACS
-2. Search for "Marstek BLE" in HACS integrations
-3. Click Install
-4. Restart Home Assistant
+1. Click this button:
+
+[![Open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jaapp&repository=ha-marstek-ble&category=integration)
+
+Or:
+
+1. Open **HACS → Integrations → Custom repositories**
+2. Add `https://github.com/jaapp/ha-marstek-ble` as an *Integration*
+3. Install **Marstek BLE** and restart Home Assistant
 
 ### Manual Installation
 
