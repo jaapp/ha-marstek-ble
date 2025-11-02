@@ -106,6 +106,14 @@ class MarstekProtocol:
             _LOGGER.warning("Invalid header: %02X %02X %02X", data[0], data[1], data[2])
             return False
 
+        # Verify XOR checksum
+        expected_checksum = 0
+        for byte in data[:-1]:
+            expected_checksum ^= byte
+        if data[-1] != expected_checksum:
+            _LOGGER.warning("Invalid checksum: expected 0x%02X, got 0x%02X", expected_checksum, data[-1])
+            return False
+
         cmd = data[3]
         payload = data[4:-1]  # Exclude header and checksum
         payload_len = len(payload)
