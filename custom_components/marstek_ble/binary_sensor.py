@@ -124,6 +124,6 @@ class MarstekBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def device_info(self):
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self.coordinator._device.address)},
-            "connections": {(CONNECTION_BLUETOOTH, self.coordinator._device.address)},
+            "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
         }

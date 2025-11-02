@@ -99,7 +99,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
         # Establish BLE connection
         async with establish_connection(
-            client_class=bluetooth.BleakClientWithServiceCache,
             device=service_info.device,
             name=self.device_name,
             disconnected_callback=lambda client: _LOGGER.debug(
