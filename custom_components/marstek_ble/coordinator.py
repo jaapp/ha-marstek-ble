@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
-from bleak_retry_connector import establish_connection
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth.active_update_coordinator import (
@@ -99,8 +99,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
         # Establish BLE connection
         async with establish_connection(
-            device=service_info.device,
-            name=self.device_name,
+            BleakClientWithServiceCache,
+            service_info.device,
+            self.device_name,
             disconnected_callback=lambda client: _LOGGER.debug(
                 "Device %s disconnected", self.device_name
             ),
