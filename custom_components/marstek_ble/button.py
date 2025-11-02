@@ -1,0 +1,107 @@
+"""Button platform for Marstek BLE integration."""
+from __future__ import annotations
+
+import logging
+
+from homeassistant.components.button import ButtonEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import (
+    CMD_AC_POWER,
+    CMD_POWER_MODE,
+    CMD_REBOOT,
+    CMD_TOTAL_POWER,
+    DOMAIN,
+)
+from .coordinator import MarstekDataUpdateCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Marstek BLE buttons from a config entry."""
+    coordinator: MarstekDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    entities = [
+        MarstekButton(
+            coordinator,
+            entry,
+            "reboot",
+            "Reboot",
+            CMD_REBOOT,
+            b"",
+        ),
+        MarstekButton(
+            coordinator,
+            entry,
+            "set_800w_mode",
+            "Set 800W Mode",
+            CMD_POWER_MODE,
+            b"\x20\x03",  # 800W
+        ),
+        MarstekButton(
+            coordinator,
+            entry,
+            "set_2500w_mode",
+            "Set 2500W Mode",
+            CMD_POWER_MODE,
+            b"\xC4\x09",  # 2500W
+        ),
+        MarstekButton(
+            coordinator,
+            entry,
+            "set_ac_power_2500w",
+            "Set AC Power 2500W",
+            CMD_AC_POWER,
+            b"\xC4\x09",  # 2500W
+        ),
+        MarstekButton(
+            coordinator,
+            entry,
+            "set_total_power_2500w",
+            "Set Total Power 2500W",
+            CMD_TOTAL_POWER,
+            b"\xC4\x09",  # 2500W
+        ),
+    ]
+
+    async_add_entities(entities)
+
+
+class MarstekButton(CoordinatorEntity, ButtonEntity):
+    """Representation of a Marstek button."""
+
+    def __init__(
+        self,
+        coordinator: MarstekDataUpdateCoordinator,
+        entry: ConfigEntry,
+        key: str,
+        name: str,
+        cmd: int,
+        payload: bytes,
+    ) -> None:
+        """Initialize the button."""
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._cmd = cmd
+        self._payload = payload
+        self._attr_entity_category = "config"
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        _LOGGER.debug("Button pressed: %s (cmd 0x%02X)", self._attr_name, self._cmd)
+
+        if not self.coordinator.client or not self.coordinator.client.is_connected:
+            _LOGGER.warning("Cannot send command: device not connected")
+            return
+
+        await self.coordinator._write_command(self._cmd, self._payload)
