@@ -1,0 +1,303 @@
+"""Marstek BLE protocol handler."""
+from __future__ import annotations
+
+import logging
+import struct
+from dataclasses import dataclass, field
+from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class MarstekData:
+    """Data from Marstek device."""
+
+    # Runtime info (0x03)
+    out1_power: float | None = None
+    temp_low: float | None = None
+    temp_high: float | None = None
+    wifi_connected: bool | None = None
+    mqtt_connected: bool | None = None
+    out1_active: bool | None = None
+    extern1_connected: bool | None = None
+
+    # Device info (0x04)
+    device_type: str | None = None
+    device_id: str | None = None
+    mac_address: str | None = None
+    firmware_version: str | None = None
+
+    # WiFi SSID (0x08)
+    wifi_ssid: str | None = None
+
+    # System data (0x0D)
+    system_status: int | None = None
+    system_value_1: int | None = None
+    system_value_2: int | None = None
+    system_value_3: int | None = None
+    system_value_4: int | None = None
+    system_value_5: int | None = None
+
+    # Timer info (0x13)
+    adaptive_mode_enabled: bool | None = None
+    smart_meter_connected: bool | None = None
+    adaptive_power_out: float | None = None
+
+    # BMS data (0x14)
+    battery_soc: float | None = None
+    battery_soh: float | None = None
+    design_capacity: float | None = None
+    battery_voltage: float | None = None
+    battery_current: float | None = None
+    battery_temp: float | None = None
+    cell_voltages: list[float | None] = field(default_factory=lambda: [None] * 16)
+
+    # Config data (0x1A)
+    config_mode: int | None = None
+    config_status: int | None = None
+    config_value: int | None = None
+
+    # Meter IP (0x21)
+    meter_ip: str | None = None
+
+    # CT polling rate (0x22)
+    ct_polling_rate: int | None = None
+
+    # Network info (0x24)
+    network_info: str | None = None
+
+    # Local API status (0x28)
+    local_api_status: str | None = None
+
+
+class MarstekProtocol:
+    """Marstek BLE protocol handler."""
+
+    @staticmethod
+    def build_command(cmd: int, payload: bytes = b"") -> bytes:
+        """Build a command frame.
+
+        Frame structure: [0x73][len][0x23][cmd][payload...][xor]
+        """
+        frame = bytearray([0x73, 0x00, 0x23, cmd])
+        frame.extend(payload)
+        frame[1] = len(frame) + 1  # Length includes checksum
+
+        # Calculate XOR checksum
+        checksum = 0
+        for byte in frame:
+            checksum ^= byte
+        frame.append(checksum)
+
+        return bytes(frame)
+
+    @staticmethod
+    def parse_notification(data: bytes, device_data: MarstekData) -> bool:
+        """Parse notification data and update device_data.
+
+        Returns True if data was successfully parsed.
+        """
+        if len(data) < 5:
+            _LOGGER.warning("Notification too short (%d bytes)", len(data))
+            return False
+
+        if data[0] != 0x73 or data[2] != 0x23:
+            _LOGGER.warning("Invalid header: %02X %02X %02X", data[0], data[1], data[2])
+            return False
+
+        cmd = data[3]
+        payload = data[4:-1]  # Exclude header and checksum
+        payload_len = len(payload)
+
+        _LOGGER.debug("Parsing cmd 0x%02X, payload length %d", cmd, payload_len)
+
+        try:
+            if cmd == 0x03:  # Runtime info
+                return MarstekProtocol._parse_runtime_info(payload, device_data)
+            elif cmd == 0x04:  # Device info
+                return MarstekProtocol._parse_device_info(payload, device_data)
+            elif cmd == 0x08:  # WiFi SSID
+                return MarstekProtocol._parse_wifi_ssid(payload, device_data)
+            elif cmd == 0x0D:  # System data
+                return MarstekProtocol._parse_system_data(payload, device_data)
+            elif cmd == 0x13:  # Timer info
+                return MarstekProtocol._parse_timer_info(payload, device_data)
+            elif cmd == 0x14:  # BMS data
+                return MarstekProtocol._parse_bms_data(payload, device_data)
+            elif cmd == 0x1A:  # Config data
+                return MarstekProtocol._parse_config_data(payload, device_data)
+            elif cmd == 0x21:  # Meter IP
+                return MarstekProtocol._parse_meter_ip(payload, device_data)
+            elif cmd == 0x22:  # CT polling rate
+                return MarstekProtocol._parse_ct_polling_rate(payload, device_data)
+            elif cmd == 0x24:  # Network info
+                return MarstekProtocol._parse_network_info(payload, device_data)
+            elif cmd == 0x28:  # Local API status
+                return MarstekProtocol._parse_local_api_status(payload, device_data)
+            else:
+                _LOGGER.debug("Unhandled cmd 0x%02X", cmd)
+                return False
+
+        except Exception as e:
+            _LOGGER.exception("Error parsing cmd 0x%02X: %s", cmd, e)
+            return False
+
+    @staticmethod
+    def _parse_runtime_info(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse runtime info (0x03)."""
+        if len(payload) < 60:
+            return False
+
+        device_data.out1_power = float(struct.unpack("<H", payload[20:22])[0])
+        device_data.temp_low = struct.unpack("<h", payload[33:35])[0] / 10.0
+        device_data.temp_high = struct.unpack("<h", payload[35:37])[0] / 10.0
+        device_data.wifi_connected = (payload[15] & 0x01) != 0
+        device_data.mqtt_connected = (payload[15] & 0x02) != 0
+        device_data.out1_active = payload[16] != 0
+        device_data.extern1_connected = payload[28] != 0
+
+        return True
+
+    @staticmethod
+    def _parse_device_info(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse device info (0x04) - ASCII key=value pairs."""
+        try:
+            info_str = payload.decode("ascii", errors="ignore")
+            pairs = info_str.split(",")
+
+            for pair in pairs:
+                if "=" not in pair:
+                    continue
+
+                key, value = pair.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+
+                if key == "type":
+                    device_data.device_type = value
+                elif key == "id":
+                    device_data.device_id = value
+                elif key == "mac":
+                    device_data.mac_address = value
+                elif key in ("dev_ver", "fc_ver"):
+                    device_data.firmware_version = value
+
+            return True
+        except Exception as e:
+            _LOGGER.exception("Error parsing device info: %s", e)
+            return False
+
+    @staticmethod
+    def _parse_wifi_ssid(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse WiFi SSID (0x08)."""
+        try:
+            device_data.wifi_ssid = payload.decode("ascii", errors="ignore").strip()
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_system_data(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse system data (0x0D)."""
+        if len(payload) < 11:
+            return False
+
+        device_data.system_status = payload[0]
+        device_data.system_value_1 = struct.unpack("<H", payload[1:3])[0]
+        device_data.system_value_2 = struct.unpack("<H", payload[3:5])[0]
+        device_data.system_value_3 = struct.unpack("<H", payload[5:7])[0]
+        device_data.system_value_4 = struct.unpack("<H", payload[7:9])[0]
+        device_data.system_value_5 = struct.unpack("<H", payload[9:11])[0]
+
+        return True
+
+    @staticmethod
+    def _parse_timer_info(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse timer info (0x13)."""
+        if len(payload) < 45:
+            return False
+
+        device_data.adaptive_mode_enabled = payload[0] != 0
+        device_data.smart_meter_connected = payload[37] != 0
+        device_data.adaptive_power_out = float(struct.unpack("<H", payload[38:40])[0])
+
+        return True
+
+    @staticmethod
+    def _parse_bms_data(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse BMS data (0x14)."""
+        if len(payload) < 80:
+            return False
+
+        device_data.battery_soc = float(struct.unpack("<H", payload[8:10])[0])
+        device_data.battery_soh = float(struct.unpack("<H", payload[10:12])[0])
+        device_data.design_capacity = float(struct.unpack("<H", payload[12:14])[0])
+        device_data.battery_voltage = struct.unpack("<H", payload[14:16])[0] / 100.0
+        device_data.battery_current = struct.unpack("<h", payload[16:18])[0] / 10.0
+        device_data.battery_temp = float(struct.unpack("<H", payload[40:42])[0])
+
+        # Parse cell voltages (16 cells starting at offset 48)
+        for i in range(16):
+            offset = 48 + i * 2
+            if offset + 1 < len(payload):
+                cell_voltage = struct.unpack("<H", payload[offset:offset + 2])[0] / 1000.0
+                device_data.cell_voltages[i] = cell_voltage
+
+        return True
+
+    @staticmethod
+    def _parse_config_data(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse config data (0x1A)."""
+        if len(payload) < 17:
+            return False
+
+        device_data.config_mode = payload[0]
+        device_data.config_status = struct.unpack("<b", payload[4:5])[0]
+        device_data.config_value = payload[16]
+
+        return True
+
+    @staticmethod
+    def _parse_meter_ip(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse meter IP (0x21)."""
+        try:
+            # Check if all 0xFF (not set)
+            if all(b == 0xFF for b in payload):
+                device_data.meter_ip = "(not set)"
+            else:
+                device_data.meter_ip = payload.decode("ascii", errors="ignore").strip("\x00")
+
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_ct_polling_rate(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse CT polling rate (0x22)."""
+        if len(payload) < 1:
+            return False
+
+        device_data.ct_polling_rate = int(payload[0])
+        return True
+
+    @staticmethod
+    def _parse_network_info(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse network info (0x24)."""
+        try:
+            device_data.network_info = payload.decode("ascii", errors="ignore").strip()
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_local_api_status(payload: bytes, device_data: MarstekData) -> bool:
+        """Parse local API status (0x28)."""
+        if len(payload) < 3:
+            return False
+
+        enabled = "enabled" if payload[0] == 1 else "disabled"
+        port = struct.unpack("<H", payload[1:3])[0]
+        device_data.local_api_status = f"{enabled}/{port}"
+
+        return True
