@@ -214,6 +214,15 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._protocol.parse_notification(bytes(data), self.data)
         self.async_set_updated_data(self.data)
 
+    @property
+    def last_update_success(self) -> bool:
+        """Return if last update was successful.
+
+        Maps last_poll_successful from ActiveBluetoothDataUpdateCoordinator
+        to last_update_success expected by CoordinatorEntity.
+        """
+        return self.last_poll_successful
+
     @callback
     def _async_handle_unavailable(
         self, service_info: bluetooth.BluetoothServiceInfoBleak
