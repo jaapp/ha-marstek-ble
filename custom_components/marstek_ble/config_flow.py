@@ -72,6 +72,7 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="bluetooth_confirm",
+            data_schema=vol.Schema({}),
             description_placeholders={
                 "name": self._discovery_info.name or self._discovery_info.address,
             },

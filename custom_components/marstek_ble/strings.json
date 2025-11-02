@@ -10,7 +10,6 @@
         }
       },
       "bluetooth_confirm": {
-        "title": "Marstek BLE Battery",
         "description": "Do you want to set up {name}?"
       }
     },
