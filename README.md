@@ -32,12 +32,11 @@ Or:
 
 ## Setup
 
-1. Ensure your Marstek battery's Bluetooth is enabled
-2. Go to **Settings** → **Devices & Services**
-3. Click **Add Integration**
-4. Search for "Marstek BLE"
-5. Select your battery from the discovered devices
-6. Click **Submit**
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration**
+3. Search for "Marstek BLE"
+4. Select your battery from the discovered devices
+5. Click **Submit**
 
 Repeat for each battery you want to add.
 
