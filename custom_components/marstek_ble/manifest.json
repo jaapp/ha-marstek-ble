@@ -4,7 +4,7 @@
   "codeowners": ["@jaapp"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/jaapp/marstek-ble-integration",
+  "documentation": "https://github.com/jaapp/ha-marstek-ble",
   "integration_type": "device",
   "iot_class": "local_polling",
   "requirements": [],
