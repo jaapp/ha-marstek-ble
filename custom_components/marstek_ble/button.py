@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -105,3 +106,11 @@ class MarstekButton(CoordinatorEntity, ButtonEntity):
             return
 
         await self.coordinator._write_command(self._cmd, self._payload)
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator._device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator._device.address)},
+        }

@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -93,3 +94,11 @@ class MarstekSelect(CoordinatorEntity, SelectEntity):
         await self.coordinator._write_command(self._cmd, payload)
         self._attr_current_option = option
         self.async_write_ha_state()
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator._device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator._device.address)},
+        }

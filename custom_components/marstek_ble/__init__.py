@@ -7,6 +7,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN, UPDATE_INTERVAL_FAST
 from .coordinator import MarstekDataUpdateCoordinator
@@ -50,6 +51,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    # Register device
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        connections={(dr.CONNECTION_BLUETOOTH, address)},
+        identifiers={(DOMAIN, address)},
+        name=entry.data.get("name", f"Marstek Battery {address}"),
+        manufacturer="Marstek",
+        model="Venus E",
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

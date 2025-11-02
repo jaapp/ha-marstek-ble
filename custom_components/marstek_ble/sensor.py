@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -385,6 +386,14 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         return self._value_fn(self.coordinator.data)
 
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator._device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator._device.address)},
+        }
+
 
 class MarstekTextSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Marstek text sensor."""
@@ -411,3 +420,11 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         value = self._value_fn(self.coordinator.data)
         return str(value) if value is not None else None
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator._device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator._device.address)},
+        }
