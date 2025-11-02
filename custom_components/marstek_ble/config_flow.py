@@ -39,6 +39,13 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
         self._discovery_info = discovery_info
 
+        # Set title placeholders for discovery card
+        device_name = discovery_info.name or discovery_info.address
+        self.context["title_placeholders"] = {
+            "name": device_name,
+            "address": discovery_info.address,
+        }
+
         return await self.async_step_bluetooth_confirm()
 
     async def async_step_bluetooth_confirm(
