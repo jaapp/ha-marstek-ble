@@ -98,7 +98,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self.ble_device = service_info.device
 
         # Establish BLE connection
-        async with establish_connection(
+        client = await establish_connection(
             BleakClientWithServiceCache,
             service_info.device,
             self.device_name,
@@ -109,7 +109,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
                 self.hass, service_info.device.address, connectable=True
             ),
-        ) as client:
+        )
+
+        try:
             # Start notifications
             await client.start_notify(CHAR_NOTIFY_UUID, self._handle_notification)
 
@@ -130,6 +132,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             finally:
                 # Stop notifications
                 await client.stop_notify(CHAR_NOTIFY_UUID)
+        finally:
+            # Disconnect client
+            await client.disconnect()
 
     async def _poll_fast(self, client) -> None:
         """Poll fast-update data (runtime info, BMS)."""

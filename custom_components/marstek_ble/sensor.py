@@ -19,6 +19,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -221,7 +222,7 @@ async def async_setup_entry(
             None,
             None,
             SensorStateClass.MEASUREMENT,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekSensor(
             coordinator,
@@ -232,7 +233,7 @@ async def async_setup_entry(
             None,
             None,
             SensorStateClass.MEASUREMENT,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekSensor(
             coordinator,
@@ -243,7 +244,7 @@ async def async_setup_entry(
             None,
             None,
             SensorStateClass.MEASUREMENT,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
     ]
 
@@ -261,7 +262,7 @@ async def async_setup_entry(
                 UnitOfElectricPotential.VOLT,
                 SensorDeviceClass.VOLTAGE,
                 SensorStateClass.MEASUREMENT,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
 
@@ -291,7 +292,7 @@ async def async_setup_entry(
                 "device_type",
                 "Device Type",
                 lambda data: data.device_type,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -299,7 +300,7 @@ async def async_setup_entry(
                 "device_id",
                 "Device ID",
                 lambda data: data.device_id,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -307,7 +308,7 @@ async def async_setup_entry(
                 "mac_address",
                 "MAC Address",
                 lambda data: data.mac_address,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -315,7 +316,7 @@ async def async_setup_entry(
                 "firmware_version",
                 "Firmware Version",
                 lambda data: data.firmware_version,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -323,7 +324,7 @@ async def async_setup_entry(
                 "wifi_ssid",
                 "WiFi SSID",
                 lambda data: data.wifi_ssid,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -331,7 +332,7 @@ async def async_setup_entry(
                 "network_info",
                 "Network Info",
                 lambda data: data.network_info,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -339,7 +340,7 @@ async def async_setup_entry(
                 "meter_ip",
                 "Meter IP",
                 lambda data: data.meter_ip,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
@@ -347,7 +348,7 @@ async def async_setup_entry(
                 "local_api_status",
                 "Local API Status",
                 lambda data: data.local_api_status,
-                entity_category="diagnostic",
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
         ]
     )
@@ -368,7 +369,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         unit: str | None,
         device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None,
-        entity_category: str | None = None,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -405,7 +406,7 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         key: str,
         name: str,
         value_fn,
-        entity_category: str | None = None,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the text sensor."""
         super().__init__(coordinator)
