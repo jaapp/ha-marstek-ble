@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
@@ -103,10 +105,8 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self._get_user_schema(),
         )
 
-    def _get_user_schema(self):
+    def _get_user_schema(self) -> vol.Schema:
         """Get the user schema."""
-        import voluptuous as vol
-
         return vol.Schema(
             {
                 vol.Required(CONF_ADDRESS): vol.In(
