@@ -33,6 +33,11 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle the bluetooth discovery step."""
         _LOGGER.debug("Discovered Marstek device: %s", discovery_info)
+        _LOGGER.info(
+            "Discovery - Name: %s, Address: %s",
+            discovery_info.name,
+            discovery_info.address,
+        )
 
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
@@ -41,9 +46,9 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Set title placeholders for discovery card
         device_name = discovery_info.name or discovery_info.address
+        _LOGGER.info("Setting title_placeholders: name=%s", device_name)
         self.context["title_placeholders"] = {
             "name": device_name,
-            "address": discovery_info.address,
         }
 
         return await self.async_step_bluetooth_confirm()
