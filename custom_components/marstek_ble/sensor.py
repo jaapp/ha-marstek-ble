@@ -161,7 +161,7 @@ async def async_setup_entry(
             lambda data: data.design_capacity,
             UnitOfEnergy.WATT_HOUR,
             SensorDeviceClass.ENERGY,
-            SensorStateClass.MEASUREMENT,
+            None,
         ),
         MarstekSensor(
             coordinator,

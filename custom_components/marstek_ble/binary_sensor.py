@@ -10,6 +10,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -35,7 +36,7 @@ async def async_setup_entry(
             "BLE Connected",
             lambda data: coordinator.client and coordinator.client.is_connected if coordinator.client else False,
             BinarySensorDeviceClass.CONNECTIVITY,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekBinarySensor(
             coordinator,
@@ -44,7 +45,7 @@ async def async_setup_entry(
             "WiFi Connected",
             lambda data: data.wifi_connected,
             BinarySensorDeviceClass.CONNECTIVITY,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekBinarySensor(
             coordinator,
@@ -53,7 +54,7 @@ async def async_setup_entry(
             "MQTT Connected",
             lambda data: data.mqtt_connected,
             BinarySensorDeviceClass.CONNECTIVITY,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekBinarySensor(
             coordinator,
@@ -62,7 +63,7 @@ async def async_setup_entry(
             "Output 1 Active",
             lambda data: data.out1_active,
             BinarySensorDeviceClass.POWER,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekBinarySensor(
             coordinator,
@@ -79,7 +80,7 @@ async def async_setup_entry(
             "Smart Meter Connected",
             lambda data: data.smart_meter_connected,
             BinarySensorDeviceClass.CONNECTIVITY,
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         ),
         MarstekBinarySensor(
             coordinator,
@@ -104,7 +105,7 @@ class MarstekBinarySensor(CoordinatorEntity, BinarySensorEntity):
         name: str,
         value_fn,
         device_class: BinarySensorDeviceClass | None = None,
-        entity_category: str | None = None,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
