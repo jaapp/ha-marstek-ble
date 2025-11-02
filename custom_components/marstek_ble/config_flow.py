@@ -51,7 +51,14 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             "name": device_name,
         }
 
-        return await self.async_step_bluetooth_confirm()
+        # Create entry directly without confirmation dialog
+        return self.async_create_entry(
+            title=device_name,
+            data={
+                CONF_ADDRESS: discovery_info.address,
+                CONF_NAME: device_name,
+            },
+        )
 
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
