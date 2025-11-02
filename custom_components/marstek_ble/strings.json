@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Marstek BLE Battery",
+        "description": "Set up your Marstek battery",
+        "data": {
+          "name": "Device Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Marstek BLE Battery",
+        "description": "Do you want to set up {name}?"
+      }
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "no_devices_found": "No Marstek devices found"
+    }
+  }
+}
