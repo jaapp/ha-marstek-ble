@@ -56,9 +56,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Device {address} not advertising, will retry later"
         )
 
-    # Start notifications for active polling
-    await coordinator.async_start_notify()
-
     # Register device
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
@@ -78,8 +75,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
-
-    coordinator: MarstekDataUpdateCoordinator = entry.runtime_data
-    await coordinator.async_stop_notify()
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
