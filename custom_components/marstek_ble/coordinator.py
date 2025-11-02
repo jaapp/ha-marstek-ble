@@ -9,7 +9,7 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
 from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth.active_update_coordinator import (
+from homeassistant.components.bluetooth.active_update_processor import (
     ActiveBluetoothProcessorCoordinator,
 )
 from homeassistant.core import HomeAssistant
