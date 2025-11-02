@@ -7,8 +7,10 @@ SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb"
 CHAR_WRITE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
 CHAR_NOTIFY_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
 
-# Device name prefix for discovery
-DEVICE_PREFIX = "MST"
+# Device name prefixes for discovery
+# MST_ACCP_ = Hardware v2 (Venus E)
+# MST_VNSE3_ = Hardware v3
+DEVICE_PREFIXES = ("MST_ACCP_", "MST_VNSE3_")
 
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 10  # Runtime info, BMS data

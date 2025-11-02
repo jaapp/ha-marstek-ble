@@ -42,8 +42,10 @@ Repeat for each battery you want to add.
 
 ## Supported Devices
 
-- Marstek Venus E (tested)
-- Other Marstek models with BLE starting with "MST" (untested)
+- Marstek Venus E hardware v2 (`MST_ACCP_*` - tested)
+- Marstek Venus E hardware v3 (`MST_VNSE3_*` - untested)
+
+**Note:** CT devices (e.g., `MST-SMR_*`) are not batteries and will not be shown in device discovery.
 
 ## BLE Proxy Setup
 
@@ -72,7 +74,7 @@ To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/comp
 ### Testing Multiple Batteries
 
 The integration supports multiple batteries. To test:
-1. Ensure each battery has a unique BLE name (MST_xxx)
+1. Ensure each battery has a unique BLE name (e.g., `MST_ACCP_5251`, `MST_ACCP_d7c4`)
 2. Add each battery separately via the UI
 3. Each will appear as a separate integration entry
 4. Each battery gets its own set of entities

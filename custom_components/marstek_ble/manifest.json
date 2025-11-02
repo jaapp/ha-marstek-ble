@@ -11,7 +11,10 @@
   "version": "0.1.0",
   "bluetooth": [
     {
-      "local_name": "MST*"
+      "local_name": "MST_ACCP_*"
+    },
+    {
+      "local_name": "MST_VNSE3_*"
     }
   ]
 }

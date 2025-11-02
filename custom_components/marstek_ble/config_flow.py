@@ -13,7 +13,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
 
-from .const import DEVICE_PREFIX, DOMAIN
+from .const import DEVICE_PREFIXES, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,10 +93,15 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 discovery_info.name,
                 discovery_info.address,
             )
-            if (
-                discovery_info.address in current_addresses
-                or not discovery_info.name
-                or not discovery_info.name.startswith(DEVICE_PREFIX)
+
+            # Check if device is already configured
+            if discovery_info.address in current_addresses:
+                _LOGGER.debug("Device already configured: %s", discovery_info.name)
+                continue
+
+            # Check if device name matches battery prefixes (not CT devices)
+            if not discovery_info.name or not any(
+                discovery_info.name.startswith(prefix) for prefix in DEVICE_PREFIXES
             ):
                 _LOGGER.debug("Device filtered out: %s", discovery_info.name)
                 continue
