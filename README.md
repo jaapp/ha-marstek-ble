@@ -50,6 +50,46 @@ To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/comp
 3. Add to Home Assistant
 4. Your Marstek batteries will automatically use the proxy when needed
 
+## Development & Testing
+
+### Local Testing
+
+1. Copy `custom_components/marstek_ble/` to your HA `config/custom_components/`
+2. Restart Home Assistant
+3. Enable debug logging in `configuration.yaml`:
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.marstek_ble: debug
+   ```
+4. Check logs: Settings → System → Logs
+
+### Testing Multiple Batteries
+
+The integration supports multiple batteries. To test:
+1. Ensure each battery has a unique BLE name (MST_xxx)
+2. Add each battery separately via the UI
+3. Each will appear as a separate integration entry
+4. Each battery gets its own set of entities
+
+### BLE Proxy Testing
+
+1. Set up an ESP32 with ESPHome BLE Proxy:
+   ```yaml
+   esphome:
+     name: ble-proxy
+
+   esp32:
+     board: esp32dev
+
+   bluetooth_proxy:
+     active: true
+   ```
+2. Flash and add to Home Assistant
+3. Move Marstek battery out of direct BLE range
+4. Verify connection maintains through proxy
+
 ## Troubleshooting
 
 - **Device not discovered**: Ensure Bluetooth is enabled on your HA server and the battery is within range
