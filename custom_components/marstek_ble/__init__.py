@@ -5,11 +5,12 @@ import logging
 
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS, Platform
+from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, UPDATE_INTERVAL_FAST
+from .const import DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,30 +28,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Marstek BLE from a config entry."""
     _LOGGER.debug("Setting up Marstek BLE entry: %s", entry.data)
 
-    address = entry.data[CONF_ADDRESS]
+    address: str = entry.data[CONF_ADDRESS]
 
     # Get BLE device
-    ble_device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
+    ble_device = bluetooth.async_ble_device_from_address(
+        hass, address.upper(), connectable=True
+    )
     if not ble_device:
-        _LOGGER.error("Could not find Marstek device with address %s", address)
-        return False
+        raise ConfigEntryNotReady(
+            f"Could not find Marstek device with address {address}"
+        )
 
-    # Create coordinator
-    coordinator = MarstekDataUpdateCoordinator(
+    # Create and store coordinator
+    coordinator = entry.runtime_data = MarstekDataUpdateCoordinator(
         hass=hass,
         logger=_LOGGER,
         address=address,
         device=ble_device,
+        device_name=entry.data.get(CONF_NAME, entry.title),
     )
 
-    # Activate coordinator polling
-    await coordinator.async_start()
+    # Start coordinator and wait for it to be ready
+    entry.async_on_unload(coordinator.async_start())
 
-    # Start coordinator
+    if not await coordinator.async_wait_ready():
+        raise ConfigEntryNotReady(
+            f"Device {address} not advertising, will retry later"
+        )
+
+    # Start notifications for active polling
     await coordinator.async_start_notify()
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Register device
     device_registry = dr.async_get(hass)
@@ -58,7 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config_entry_id=entry.entry_id,
         connections={(dr.CONNECTION_BLUETOOTH, address)},
         identifiers={(DOMAIN, address)},
-        name=entry.data.get("name", f"Marstek Battery {address}"),
+        name=entry.data.get(CONF_NAME, entry.title),
         manufacturer="Marstek",
         model="Venus E",
     )
@@ -72,13 +79,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
 
-    coordinator: MarstekDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.async_stop()
+    coordinator: MarstekDataUpdateCoordinator = entry.runtime_data
     await coordinator.async_stop_notify()
 
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

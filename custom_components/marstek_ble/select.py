@@ -22,7 +22,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Marstek BLE selects from a config entry."""
-    coordinator: MarstekDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: MarstekDataUpdateCoordinator = entry.runtime_data
 
     entities = [
         MarstekSelect(

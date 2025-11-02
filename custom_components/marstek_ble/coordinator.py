@@ -9,10 +9,10 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
 from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth.active_update_processor import (
-    ActiveBluetoothProcessorCoordinator,
+from homeassistant.components.bluetooth.active_update_coordinator import (
+    ActiveBluetoothDataUpdateCoordinator,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant, callback
 
 from .const import (
     CHAR_NOTIFY_UUID,
@@ -37,7 +37,7 @@ from .marstek_device import MarstekData, MarstekProtocol
 _LOGGER = logging.getLogger(__name__)
 
 
-class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekData]):
+class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     """Class to manage fetching Marstek data from BLE device."""
 
     def __init__(
@@ -46,6 +46,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekDa
         logger: logging.Logger,
         address: str,
         device: BLEDevice,
+        device_name: str,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -53,20 +54,47 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekDa
             logger=logger,
             address=address,
             mode=bluetooth.BluetoothScanningMode.ACTIVE,
+            needs_poll_method=self._needs_poll,
+            poll_method=self._async_update,
             connectable=True,
         )
         self.update_interval = timedelta(seconds=UPDATE_INTERVAL_FAST)
-        self._device = device
+        self.ble_device = device
+        self.device_name = device_name
         self._protocol = MarstekProtocol
         self.data = MarstekData()
         self._connected = False
         self._fast_poll_count = 0
         self._medium_poll_count = 0
         self._slow_poll_count = 0
+        self._ready_event = asyncio.Event()
+        self._was_unavailable = True
 
-    async def _async_update(self, data: MarstekData) -> MarstekData:
+    @callback
+    def _needs_poll(
+        self,
+        service_info: bluetooth.BluetoothServiceInfoBleak,
+        seconds_since_last_poll: float | None,
+    ) -> bool:
+        """Determine if polling is needed."""
+        # Only poll if hass is running and we have a connectable device
+        return (
+            self.hass.state is CoreState.running
+            and bool(
+                bluetooth.async_ble_device_from_address(
+                    self.hass, service_info.device.address, connectable=True
+                )
+            )
+        )
+
+    async def _async_update(
+        self, service_info: bluetooth.BluetoothServiceInfoBleak
+    ) -> None:
         """Poll the device for data."""
         _LOGGER.debug("Updating Marstek data")
+
+        # Update BLE device reference
+        self.ble_device = service_info.device
 
         # Fast poll (every update - 10s)
         await self._poll_fast()
@@ -81,8 +109,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekDa
         if self._fast_poll_count % 30 == 0:
             await self._poll_slow()
             self._slow_poll_count += 1
-
-        return self.data
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
@@ -198,3 +224,41 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothProcessorCoordinator[MarstekDa
             _LOGGER.debug("Stopped notifications")
         except Exception as e:
             _LOGGER.warning("Error stopping notifications: %s", e)
+
+    @callback
+    def _async_handle_unavailable(
+        self, service_info: bluetooth.BluetoothServiceInfoBleak
+    ) -> None:
+        """Handle the device going unavailable."""
+        super()._async_handle_unavailable(service_info)
+        self._was_unavailable = True
+        _LOGGER.info("Device %s is unavailable", self.device_name)
+
+    @callback
+    def _async_handle_bluetooth_event(
+        self,
+        service_info: bluetooth.BluetoothServiceInfoBleak,
+        change: bluetooth.BluetoothChange,
+    ) -> None:
+        """Handle a Bluetooth event."""
+        self.ble_device = service_info.device
+
+        # Mark device as ready when we receive advertisements
+        if not self._ready_event.is_set():
+            self._ready_event.set()
+
+        if self._was_unavailable:
+            self._was_unavailable = False
+            _LOGGER.info("Device %s is online", self.device_name)
+
+        super()._async_handle_bluetooth_event(service_info, change)
+
+    async def async_wait_ready(self) -> bool:
+        """Wait for the device to be ready."""
+        import contextlib
+        try:
+            async with asyncio.timeout(30):
+                await self._ready_event.wait()
+                return True
+        except TimeoutError:
+            return False
