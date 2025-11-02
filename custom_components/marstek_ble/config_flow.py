@@ -88,13 +88,24 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         current_addresses = self._async_current_ids()
 
         for discovery_info in async_discovered_service_info(self.hass):
+            _LOGGER.debug(
+                "Checking discovered device: %s (%s)",
+                discovery_info.name,
+                discovery_info.address,
+            )
             if (
                 discovery_info.address in current_addresses
                 or not discovery_info.name
                 or not discovery_info.name.startswith(DEVICE_PREFIX)
             ):
+                _LOGGER.debug("Device filtered out: %s", discovery_info.name)
                 continue
 
+            _LOGGER.info(
+                "Adding Marstek device to selection: %s (%s)",
+                discovery_info.name,
+                discovery_info.address,
+            )
             self._discovered_devices[discovery_info.address] = discovery_info
 
         if not self._discovered_devices:
