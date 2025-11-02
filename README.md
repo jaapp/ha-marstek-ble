@@ -103,9 +103,9 @@ The integration supports multiple batteries. To test:
 ## Attribution
 
 Based on reverse engineering work from:
+- [marstek-venus-monitor](https://github.com/rweijnen/marstek-venus-monitor) by @rweijnen
 - [esphome-b2500](https://github.com/tomquist/esphome-b2500) by @tomquist
 - [hm2500pub](https://github.com/noone2k/hm2500pub) by @noone2k
-- [marstek-venus-monitor](https://github.com/rweijnen/marstek-venus-monitor) by @rweijnen
 
 ## License
 
