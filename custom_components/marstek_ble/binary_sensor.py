@@ -104,6 +104,7 @@ class MarstekBinarySensor(CoordinatorEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
+        self._attr_has_entity_name = True
         self._value_fn = value_fn
         self._attr_device_class = device_class
         self._attr_entity_category = entity_category
@@ -125,4 +126,7 @@ class MarstekBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
+            "name": self.coordinator.device_name,
+            "manufacturer": "Marstek",
+            "model": "Venus E",
         }

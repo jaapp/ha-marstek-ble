@@ -81,6 +81,7 @@ class MarstekSelect(
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
+        self._attr_has_entity_name = True
         self._cmd = cmd
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_{key}"
@@ -120,6 +121,9 @@ class MarstekSelect(
         return {
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
+            "name": self.coordinator.device_name,
+            "manufacturer": "Marstek",
+            "model": "Venus E",
         }
 
     @callback

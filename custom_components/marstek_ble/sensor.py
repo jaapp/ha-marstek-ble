@@ -375,6 +375,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
+        self._attr_has_entity_name = True
         self._value_fn = value_fn
         self._attr_native_unit_of_measurement = unit
         self._attr_device_class = device_class
@@ -398,6 +399,9 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
+            "name": self.coordinator.device_name,
+            "manufacturer": "Marstek",
+            "model": "Venus E",
         }
 
 
@@ -417,6 +421,7 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
+        self._attr_has_entity_name = True
         self._value_fn = value_fn
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
@@ -438,4 +443,7 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
+            "name": self.coordinator.device_name,
+            "manufacturer": "Marstek",
+            "model": "Venus E",
         }

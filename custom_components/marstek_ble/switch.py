@@ -104,6 +104,7 @@ class MarstekSwitch(CoordinatorEntity[MarstekDataUpdateCoordinator], SwitchEntit
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
+        self._attr_has_entity_name = True
         self._cmd = cmd
         self._value_fn = value_fn
         self._assumed_state: bool | None = None
@@ -138,6 +139,9 @@ class MarstekSwitch(CoordinatorEntity[MarstekDataUpdateCoordinator], SwitchEntit
         return {
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
+            "name": self.coordinator.device_name,
+            "manufacturer": "Marstek",
+            "model": "Venus E",
         }
 
     @callback
