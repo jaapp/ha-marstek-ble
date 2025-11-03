@@ -395,11 +395,15 @@ class MarstekBLEDevice:
 
                 # Start notifications if callback provided
                 if self._notification_callback and not self._notifications_started:
+                    _LOGGER.info("%s: Starting notifications for %s", self._device_name, CHAR_NOTIFY_UUID)
                     await self._client.start_notify(
                         CHAR_NOTIFY_UUID, self._notification_callback
                     )
                     self._notifications_started = True
-                    _LOGGER.debug("%s: Notifications started", self._device_name)
+                    _LOGGER.info("%s: Notifications started successfully", self._device_name)
+                else:
+                    _LOGGER.info("%s: Notifications already started or no callback (callback=%s, started=%s)",
+                                self._device_name, self._notification_callback is not None, self._notifications_started)
 
             except (BleakError, TimeoutError) as ex:
                 _LOGGER.warning(
@@ -471,7 +475,7 @@ class MarstekBLEDevice:
 
                     self._reset_disconnect_timer()
 
-                    _LOGGER.debug(
+                    _LOGGER.info(
                         "%s: Command 0x%02X sent successfully", self._device_name, cmd
                     )
                     return True

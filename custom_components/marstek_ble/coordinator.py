@@ -127,6 +127,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
         try:
+            _LOGGER.debug("Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
+                         self.data.battery_voltage, self.data.battery_soc)
+
             # Runtime info
             await self.device.send_command(CMD_RUNTIME_INFO)
             await asyncio.sleep(0.3)
@@ -134,6 +137,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             # BMS data
             await self.device.send_command(CMD_BMS_DATA)
             await asyncio.sleep(0.3)
+
+            _LOGGER.debug("Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
+                         self.data.battery_voltage, self.data.battery_soc)
 
         except Exception as e:
             _LOGGER.warning("Error polling fast data: %s", e)
@@ -188,8 +194,15 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""
-        _LOGGER.debug("Received notification: %s", bytes(data).hex())
-        self._protocol.parse_notification(bytes(data), self.data)
+        _LOGGER.info("Received notification from sender %s: %s", sender, bytes(data).hex())
+        _LOGGER.debug("Data before parsing: battery_voltage=%s, battery_soc=%s",
+                     self.data.battery_voltage, self.data.battery_soc)
+
+        result = self._protocol.parse_notification(bytes(data), self.data)
+
+        _LOGGER.debug("Parse result: %s, data after parsing: battery_voltage=%s, battery_soc=%s",
+                     result, self.data.battery_voltage, self.data.battery_soc)
+
         self.async_set_updated_data(self.data)
 
     @property
