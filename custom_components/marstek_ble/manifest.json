@@ -3,7 +3,7 @@
   "name": "Marstek BLE",
   "codeowners": ["@jaapp"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["bluetooth", "integration", "utility_meter"],
   "documentation": "https://github.com/jaapp/ha-marstek-ble",
   "issue_tracker": "https://github.com/jaapp/ha-marstek-ble/issues",
   "integration_type": "device",
