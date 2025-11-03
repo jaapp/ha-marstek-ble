@@ -104,7 +104,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     async def _async_update(
         self, service_info: bluetooth.BluetoothServiceInfoBleak
-    ) -> None:
+    ) -> MarstekData:
         """Poll the device for data."""
         _LOGGER.info("_async_update called - Updating Marstek data from %s", service_info.device.address)
 
@@ -127,6 +127,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         if self._fast_poll_count % 30 == 0:
             await self._poll_slow()
             self._slow_poll_count += 1
+
+        # Return the current data snapshot so ActiveBluetoothDataUpdateCoordinator
+        # retains the populated MarstekData instance.
+        return self.data
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
@@ -207,7 +211,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         _LOGGER.debug("Parse result: %s, data after parsing: battery_voltage=%s, battery_soc=%s",
                      result, self.data.battery_voltage, self.data.battery_soc)
 
-        self.async_set_updated_data(self.data)
+        if result:
+            # Entities listen for coordinator updates; notify only when parsing succeeded.
+            self.async_update_listeners()
 
     @property
     def last_update_success(self) -> bool:
