@@ -3,11 +3,22 @@ from __future__ import annotations
 
 import logging
 
+from datetime import timedelta
+
+from homeassistant.components.integration.const import METHOD_TRAPEZOIDAL
+from homeassistant.components.integration.sensor import IntegrationSensor
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.components.utility_meter.const import (
+    CONF_TARIFF_ENTITY,
+    DAILY,
+    DATA_TARIFF_SENSORS,
+    DATA_UTILITY,
+)
+from homeassistant.components.utility_meter.sensor import UtilityMeterSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
@@ -16,11 +27,13 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -354,6 +367,127 @@ async def async_setup_entry(
     )
 
     async_add_entities(entities)
+
+    async def _async_setup_energy_helpers() -> None:
+        """Create integration and daily utility meter sensors once base sensors are registered."""
+        await hass.async_block_till_done()
+
+        entity_registry = er.async_get(hass)
+
+        def _resolve_entity_id(key: str) -> str | None:
+            return entity_registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+            )
+
+        power_in_entity_id = _resolve_entity_id("battery_power_in")
+        power_out_entity_id = _resolve_entity_id("battery_power_out")
+
+        energy_entities: list[IntegrationSensor] = []
+
+        if power_in_entity_id:
+            energy_entities.append(
+                IntegrationSensor(
+                    hass,
+                    integration_method=METHOD_TRAPEZOIDAL,
+                    name=f"{coordinator.device_name} Battery Energy In",
+                    round_digits=3,
+                    source_entity=power_in_entity_id,
+                    unique_id=f"{entry.entry_id}_battery_energy_in",
+                    unit_prefix=None,
+                    unit_time=UnitOfTime.HOURS,
+                    max_sub_interval=None,
+                )
+            )
+        else:
+            _LOGGER.warning(
+                "Unable to resolve battery power in entity for %s; skipping Battery Energy In sensor",
+                coordinator.device_name,
+            )
+
+        if power_out_entity_id:
+            energy_entities.append(
+                IntegrationSensor(
+                    hass,
+                    integration_method=METHOD_TRAPEZOIDAL,
+                    name=f"{coordinator.device_name} Battery Energy Out",
+                    round_digits=3,
+                    source_entity=power_out_entity_id,
+                    unique_id=f"{entry.entry_id}_battery_energy_out",
+                    unit_prefix=None,
+                    unit_time=UnitOfTime.HOURS,
+                    max_sub_interval=None,
+                )
+            )
+        else:
+            _LOGGER.warning(
+                "Unable to resolve battery power out entity for %s; skipping Battery Energy Out sensor",
+                coordinator.device_name,
+            )
+
+        if energy_entities:
+            async_add_entities(energy_entities)
+            await hass.async_block_till_done()
+        else:
+            return
+
+        energy_in_entity_id = _resolve_entity_id("battery_energy_in")
+        energy_out_entity_id = _resolve_entity_id("battery_energy_out")
+
+        utility_entities: list[UtilityMeterSensor] = []
+        utility_data = hass.data.setdefault(DATA_UTILITY, {})
+
+        utility_specs: list[tuple[str, str | None, str]] = [
+            (
+                "daily_battery_energy_in",
+                energy_in_entity_id,
+                f"{coordinator.device_name} Daily Battery Energy In",
+            ),
+            (
+                "daily_battery_energy_out",
+                energy_out_entity_id,
+                f"{coordinator.device_name} Daily Battery Energy Out",
+            ),
+        ]
+
+        for slug, source_entity_id, name in utility_specs:
+            if not source_entity_id:
+                _LOGGER.warning(
+                    "Unable to resolve integration sensor entity for %s; skipping %s",
+                    slug,
+                    name,
+                )
+                continue
+
+            parent_meter = f"{entry.entry_id}_{slug}_utility"
+            utility_data[parent_meter] = {
+                DATA_TARIFF_SENSORS: [],
+                CONF_TARIFF_ENTITY: None,
+            }
+
+            meter = UtilityMeterSensor(
+                hass,
+                cron_pattern=None,
+                delta_values=False,
+                meter_offset=timedelta(0),
+                meter_type=DAILY,
+                name=name,
+                net_consumption=False,
+                parent_meter=parent_meter,
+                periodically_resetting=False,
+                source_entity=source_entity_id,
+                tariff_entity=None,
+                tariff=None,
+                unique_id=f"{entry.entry_id}_{slug}",
+                sensor_always_available=False,
+            )
+
+            utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
+            utility_entities.append(meter)
+
+        if utility_entities:
+            async_add_entities(utility_entities)
+
+    hass.async_create_task(_async_setup_energy_helpers())
 
 
 class MarstekSensor(CoordinatorEntity, SensorEntity):
