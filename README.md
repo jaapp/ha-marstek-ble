@@ -53,6 +53,17 @@ Repeat for each battery you want to add.
 
 To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/components/bluetooth_proxy/):
 
+### Recommended Hardware
+
+Any ESP32 device will work as a Bluetooth proxy. Popular options include:
+
+- **ESP-WROOM-32** - Affordable general-purpose ESP32 module
+- **M5Stack Atom Lite** - Compact device with built-in RGB LED for status indication
+- **ESP32-DevKitC** - Development board with USB programming
+- **Any ESP32-based device** with Bluetooth support
+
+### Setup Steps
+
 1. Flash an ESP32 device with ESPHome
 2. Add the bluetooth_proxy component
 3. Add to Home Assistant
