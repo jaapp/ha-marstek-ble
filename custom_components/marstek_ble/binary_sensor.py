@@ -117,6 +117,11 @@ class MarstekBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return super().available and self.coordinator.data is not None
+
+    @property
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
         return self._value_fn(self.coordinator.data)

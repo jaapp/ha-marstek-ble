@@ -383,6 +383,11 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return super().available and self.coordinator.data is not None
+
+    @property
     def native_value(self):
         """Return the state of the sensor."""
         return self._value_fn(self.coordinator.data)
@@ -415,6 +420,11 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         self._value_fn = value_fn
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return super().available and self.coordinator.data is not None
 
     @property
     def native_value(self):
