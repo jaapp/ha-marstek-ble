@@ -334,6 +334,7 @@ class MarstekBLEDevice:
         ble_device: BLEDevice,
         device_name: str,
         ble_device_callback: Callable[[], BLEDevice] | None = None,
+        notification_callback: Callable[[int, bytearray], None] | None = None,
     ) -> None:
         """Initialize the Marstek BLE device.
 
@@ -341,15 +342,18 @@ class MarstekBLEDevice:
             ble_device: The BLE device object
             device_name: Human-readable device name
             ble_device_callback: Callback to get updated BLE device (for reconnection)
+            notification_callback: Callback for handling BLE notifications
         """
         self._ble_device = ble_device
         self._device_name = device_name
         self._ble_device_callback = ble_device_callback
+        self._notification_callback = notification_callback
         self._client: BleakClientWithServiceCache | None = None
         self._connect_lock = asyncio.Lock()
         self._operation_lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._expected_disconnect = False
+        self._notifications_started = False
 
     @property
     def name(self) -> str:
@@ -388,6 +392,15 @@ class MarstekBLEDevice:
                     ble_device_callback=self._ble_device_callback,
                 )
                 _LOGGER.debug("%s: Connected successfully", self._device_name)
+
+                # Start notifications if callback provided
+                if self._notification_callback and not self._notifications_started:
+                    await self._client.start_notify(
+                        CHAR_NOTIFY_UUID, self._notification_callback
+                    )
+                    self._notifications_started = True
+                    _LOGGER.debug("%s: Notifications started", self._device_name)
+
             except (BleakError, TimeoutError) as ex:
                 _LOGGER.warning(
                     "%s: Failed to connect: %s", self._device_name, ex
@@ -402,6 +415,7 @@ class MarstekBLEDevice:
         else:
             _LOGGER.warning("%s: Unexpected disconnect", self._device_name)
         self._client = None
+        self._notifications_started = False
 
     def _reset_disconnect_timer(self) -> None:
         """Reset the disconnect timer."""
@@ -500,6 +514,16 @@ class MarstekBLEDevice:
         async with self._connect_lock:
             if self._client and self._client.is_connected:
                 _LOGGER.debug("%s: Disconnecting", self._device_name)
+
+                # Stop notifications if started
+                if self._notifications_started:
+                    try:
+                        await self._client.stop_notify(CHAR_NOTIFY_UUID)
+                        _LOGGER.debug("%s: Notifications stopped", self._device_name)
+                    except Exception as ex:
+                        _LOGGER.debug("%s: Error stopping notifications: %s", self._device_name, ex)
+                    self._notifications_started = False
+
                 self._expected_disconnect = True
                 await self._client.disconnect()
             self._client = None

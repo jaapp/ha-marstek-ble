@@ -78,6 +78,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
                 self.hass, address, connectable=True
             ),
+            notification_callback=self._handle_notification,
         )
 
     @callback
@@ -106,121 +107,84 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # Update BLE device reference
         self.ble_device = service_info.device
 
-        # Establish BLE connection
-        client = await establish_connection(
-            BleakClientWithServiceCache,
-            service_info.device,
-            self.device_name,
-            disconnected_callback=lambda client: _LOGGER.debug(
-                "Device %s disconnected", self.device_name
-            ),
-            use_services_cache=True,
-            ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
-                self.hass, service_info.device.address, connectable=True
-            ),
-        )
+        # Use persistent device object for polling (SwitchBot pattern)
+        # The device manages its own connection lifecycle
 
-        try:
-            # Start notifications
-            await client.start_notify(CHAR_NOTIFY_UUID, self._handle_notification)
+        # Fast poll (every update - 10s)
+        await self._poll_fast()
+        self._fast_poll_count += 1
 
-            try:
-                # Fast poll (every update - 10s)
-                await self._poll_fast(client)
-                self._fast_poll_count += 1
+        # Medium poll (every 6th update - 60s)
+        if self._fast_poll_count % 6 == 0:
+            await self._poll_medium()
+            self._medium_poll_count += 1
 
-                # Medium poll (every 6th update - 60s)
-                if self._fast_poll_count % 6 == 0:
-                    await self._poll_medium(client)
-                    self._medium_poll_count += 1
+        # Slow poll (every 30th update - 5 min)
+        if self._fast_poll_count % 30 == 0:
+            await self._poll_slow()
+            self._slow_poll_count += 1
 
-                # Slow poll (every 30th update - 5 min)
-                if self._fast_poll_count % 30 == 0:
-                    await self._poll_slow(client)
-                    self._slow_poll_count += 1
-            finally:
-                # Stop notifications
-                await client.stop_notify(CHAR_NOTIFY_UUID)
-        finally:
-            # Disconnect client
-            await client.disconnect()
-
-    async def _poll_fast(self, client) -> None:
+    async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
         try:
             # Runtime info
-            await self._write_command(client, CMD_RUNTIME_INFO)
+            await self.device.send_command(CMD_RUNTIME_INFO)
             await asyncio.sleep(0.3)
 
             # BMS data
-            await self._write_command(client, CMD_BMS_DATA)
+            await self.device.send_command(CMD_BMS_DATA)
             await asyncio.sleep(0.3)
 
         except Exception as e:
             _LOGGER.warning("Error polling fast data: %s", e)
 
-    async def _poll_medium(self, client) -> None:
+    async def _poll_medium(self) -> None:
         """Poll medium-update data (system, WiFi, config, etc)."""
         try:
             # System data
-            await self._write_command(client, CMD_SYSTEM_DATA)
+            await self.device.send_command(CMD_SYSTEM_DATA)
             await asyncio.sleep(0.3)
 
             # WiFi SSID
-            await self._write_command(client, CMD_WIFI_SSID)
+            await self.device.send_command(CMD_WIFI_SSID)
             await asyncio.sleep(0.3)
 
             # Config data
-            await self._write_command(client, CMD_CONFIG_DATA)
+            await self.device.send_command(CMD_CONFIG_DATA)
             await asyncio.sleep(0.3)
 
             # CT polling rate
-            await self._write_command(client, CMD_CT_POLLING_RATE)
+            await self.device.send_command(CMD_CT_POLLING_RATE)
             await asyncio.sleep(0.3)
 
             # Local API status
-            await self._write_command(client, CMD_LOCAL_API_STATUS)
+            await self.device.send_command(CMD_LOCAL_API_STATUS)
             await asyncio.sleep(0.3)
 
             # Meter IP
-            await self._write_command(client, CMD_METER_IP, b"\x0B")
+            await self.device.send_command(CMD_METER_IP, b"\x0B")
             await asyncio.sleep(0.3)
 
             # Network info
-            await self._write_command(client, CMD_NETWORK_INFO)
+            await self.device.send_command(CMD_NETWORK_INFO)
             await asyncio.sleep(0.3)
 
         except Exception as e:
             _LOGGER.warning("Error polling medium data: %s", e)
 
-    async def _poll_slow(self, client) -> None:
+    async def _poll_slow(self) -> None:
         """Poll slow-update data (timer info, logs)."""
         try:
             # Timer info
-            await self._write_command(client, CMD_TIMER_INFO)
+            await self.device.send_command(CMD_TIMER_INFO)
             await asyncio.sleep(0.3)
 
             # Logs
-            await self._write_command(client, CMD_LOGS)
+            await self.device.send_command(CMD_LOGS)
             await asyncio.sleep(0.3)
 
         except Exception as e:
             _LOGGER.warning("Error polling slow data: %s", e)
-
-    async def _write_command(self, client, cmd: int, payload: bytes = b"") -> None:
-        """Write a command to the device."""
-        if not client or not client.is_connected:
-            _LOGGER.warning("Cannot write command: not connected")
-            return
-
-        command_data = self._protocol.build_command(cmd, payload)
-        _LOGGER.debug("Writing command 0x%02X: %s", cmd, command_data.hex())
-
-        try:
-            await client.write_gatt_char(CHAR_WRITE_UUID, command_data, response=True)
-        except BleakError as e:
-            _LOGGER.warning("Error writing command 0x%02X: %s", cmd, e)
-            raise
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""
