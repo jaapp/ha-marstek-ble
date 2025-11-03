@@ -4,7 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from bleak.backends.device import BLEDevice
@@ -354,6 +357,24 @@ class MarstekBLEDevice:
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._expected_disconnect = False
         self._notifications_started = False
+        self._command_history: deque[dict[str, Any]] = deque(maxlen=25)
+        self._notification_history: deque[dict[str, Any]] = deque(maxlen=25)
+        self._command_stats: defaultdict[int, dict[str, Any]] = defaultdict(
+            lambda: {
+                "sent": 0,
+                "success": 0,
+                "failure": 0,
+                "last_success": None,
+                "last_failure": None,
+                "last_error": None,
+                "last_notification": None,
+                "last_notification_hex": None,
+            }
+        )
+        self._total_commands_sent = 0
+        self._total_commands_success = 0
+        self._total_commands_failure = 0
+        self._last_command_error: str | None = None
 
     @property
     def name(self) -> str:
@@ -458,12 +479,16 @@ class MarstekBLEDevice:
         Returns:
             True if command was sent successfully
         """
+        command_data = MarstekProtocol.build_command(cmd, payload)
+        attempts_made = 0
+        last_error: str | None = None
+
         async with self._operation_lock:
             for attempt in range(retry):
+                attempts_made = attempt + 1
                 try:
                     await self._ensure_connected()
 
-                    command_data = MarstekProtocol.build_command(cmd, payload)
                     _LOGGER.debug(
                         "%s: Sending command 0x%02X (attempt %d/%d): %s",
                         self._device_name,
@@ -480,9 +505,17 @@ class MarstekBLEDevice:
                     _LOGGER.debug(
                         "%s: Command 0x%02X sent successfully", self._device_name, cmd
                     )
+                    self._record_command_result(
+                        cmd=cmd,
+                        frame=command_data,
+                        attempts=attempts_made,
+                        success=True,
+                        error=None,
+                    )
                     return True
 
                 except (BleakError, TimeoutError) as ex:
+                    last_error = str(ex)
                     _LOGGER.warning(
                         "%s: Failed to send command 0x%02X (attempt %d/%d): %s",
                         self._device_name,
@@ -509,6 +542,13 @@ class MarstekBLEDevice:
                 cmd,
                 retry,
             )
+            self._record_command_result(
+                cmd=cmd,
+                frame=command_data,
+                attempts=attempts_made,
+                success=False,
+                error=last_error,
+            )
             return False
 
     async def disconnect(self) -> None:
@@ -533,3 +573,150 @@ class MarstekBLEDevice:
                 self._expected_disconnect = True
                 await self._client.disconnect()
             self._client = None
+
+    @property
+    def is_connected(self) -> bool:
+        """Return whether the BLE client is currently connected."""
+        return bool(self._client and self._client.is_connected)
+
+    def _record_command_result(
+        self,
+        *,
+        cmd: int,
+        frame: bytes,
+        attempts: int,
+        success: bool,
+        error: str | None,
+    ) -> None:
+        """Record diagnostic information about a command."""
+        timestamp = time.time()
+        payload = frame[4:-1] if len(frame) > 5 else b""
+
+        self._command_history.append(
+            {
+                "timestamp": timestamp,
+                "command": f"0x{cmd:02X}",
+                "payload_hex": payload.hex(),
+                "frame_hex": frame.hex(),
+                "attempts": attempts,
+                "success": success,
+                "error": error,
+            }
+        )
+
+        stats = self._command_stats[cmd]
+        stats["sent"] += 1
+        self._total_commands_sent += 1
+
+        if success:
+            stats["success"] += 1
+            stats["last_success"] = timestamp
+            self._total_commands_success += 1
+            self._last_command_error = None
+        else:
+            stats["failure"] += 1
+            stats["last_failure"] = timestamp
+            stats["last_error"] = error
+            self._total_commands_failure += 1
+            self._last_command_error = error
+
+    def record_notification(
+        self, sender: int, data: bytes, parsed: bool
+    ) -> None:
+        """Record details of the latest notifications for diagnostics."""
+        timestamp = time.time()
+        command = data[3] if len(data) > 3 else None
+        payload = data[4:-1] if len(data) > 5 else b""
+
+        entry = {
+            "timestamp": timestamp,
+            "sender": sender,
+            "command": f"0x{command:02X}" if command is not None else None,
+            "frame_hex": data.hex(),
+            "payload_hex": payload.hex(),
+            "parsed": parsed,
+        }
+        self._notification_history.append(entry)
+
+        if command is not None:
+            stats = self._command_stats[command]
+            stats["last_notification"] = timestamp
+            stats["last_notification_hex"] = data.hex()
+
+    @staticmethod
+    def _iso_timestamp(timestamp: float | None) -> str | None:
+        """Convert a timestamp to ISO format in UTC."""
+        if timestamp is None:
+            return None
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return diagnostic information for this BLE device."""
+        command_history = [
+            {
+                **{
+                    k: v
+                    for k, v in entry.items()
+                    if k != "timestamp"
+                },
+                "timestamp": self._iso_timestamp(entry["timestamp"]),
+            }
+            for entry in list(self._command_history)
+        ]
+
+        notification_history = [
+            {
+                **{
+                    k: v
+                    for k, v in entry.items()
+                    if k != "timestamp"
+                },
+                "timestamp": self._iso_timestamp(entry["timestamp"]),
+            }
+            for entry in list(self._notification_history)
+        ]
+
+        command_stats: dict[str, Any] = {}
+        for cmd, stats in self._command_stats.items():
+            sent = stats["sent"]
+            success = stats["success"]
+            success_rate = (success / sent) if sent else None
+            command_stats[f"0x{cmd:02X}"] = {
+                "sent": sent,
+                "success": success,
+                "failure": stats["failure"],
+                "success_rate": round(success_rate * 100, 2) if success_rate is not None else None,
+                "ratio": f"{success}/{sent}" if sent else "0/0",
+                "last_success": self._iso_timestamp(stats.get("last_success")),
+                "last_failure": self._iso_timestamp(stats.get("last_failure")),
+                "last_notification": self._iso_timestamp(stats.get("last_notification")),
+                "last_notification_hex": stats.get("last_notification_hex"),
+                "last_error": stats.get("last_error"),
+            }
+
+        overall_sent = self._total_commands_sent
+        overall_success = self._total_commands_success
+        overall_success_rate = (
+            overall_success / overall_sent if overall_sent else None
+        )
+
+        return {
+            "device_name": self._device_name,
+            "address": self.address,
+            "connected": self.is_connected,
+            "overall": {
+                "total_sent": overall_sent,
+                "success": overall_success,
+                "failure": self._total_commands_failure,
+                "success_rate": round(overall_success_rate * 100, 2)
+                if overall_success_rate is not None
+                else None,
+                "ratio": f"{overall_success}/{overall_sent}"
+                if overall_sent
+                else "0/0",
+                "last_error": self._last_command_error,
+            },
+            "recent_commands": command_history,
+            "recent_notifications": notification_history,
+            "command_stats": command_stats,
+        }
