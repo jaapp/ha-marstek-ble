@@ -6,10 +6,11 @@
         "title": "Marstek BLE Battery",
         "description": "Set up your Marstek battery",
         "data": {
-          "name": "Device Name"
+          "address": "Device address"
         }
       },
       "bluetooth_confirm": {
+        "title": "Marstek BLE Battery",
         "description": "Do you want to set up {name}?"
       }
     },

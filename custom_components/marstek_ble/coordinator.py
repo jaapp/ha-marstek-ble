@@ -81,6 +81,15 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             notification_callback=self._handle_notification,
         )
 
+    async def _send_and_sleep(
+        self, command: int, payload: bytes = b"", delay: float = 0.3
+    ) -> None:
+        """Send a command and optionally wait for a response window."""
+        if not await self.device.send_command(command, payload):
+            raise BleakError(f"Failed to send command 0x{command:02X}")
+        if delay:
+            await asyncio.sleep(delay)
+
     @callback
     def _needs_poll(
         self,
@@ -95,7 +104,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
         needs_poll = hass_running and bool(ble_device)
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "_needs_poll called: hass_running=%s, ble_device=%s, seconds_since_last_poll=%s, needs_poll=%s",
             hass_running, ble_device is not None, seconds_since_last_poll, needs_poll
         )
@@ -106,7 +115,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self, service_info: bluetooth.BluetoothServiceInfoBleak
     ) -> MarstekData:
         """Poll the device for data."""
-        _LOGGER.info("_async_update called - Updating Marstek data from %s", service_info.device.address)
+        _LOGGER.debug(
+            "_async_update called - Updating Marstek data from %s",
+            service_info.device.address,
+        )
 
         # Update BLE device reference
         self.ble_device = service_info.device
@@ -134,75 +146,58 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
-        try:
-            _LOGGER.debug("Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
-                         self.data.battery_voltage, self.data.battery_soc)
+        _LOGGER.debug(
+            "Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
+            self.data.battery_voltage,
+            self.data.battery_soc,
+        )
 
-            # Runtime info
-            await self.device.send_command(CMD_RUNTIME_INFO)
-            await asyncio.sleep(0.3)
+        # Runtime info
+        await self._send_and_sleep(CMD_RUNTIME_INFO)
 
-            # BMS data
-            await self.device.send_command(CMD_BMS_DATA)
-            await asyncio.sleep(0.3)
+        # BMS data
+        await self._send_and_sleep(CMD_BMS_DATA)
 
-            _LOGGER.debug("Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
-                         self.data.battery_voltage, self.data.battery_soc)
-
-        except Exception as e:
-            _LOGGER.warning("Error polling fast data: %s", e)
+        _LOGGER.debug(
+            "Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
+            self.data.battery_voltage,
+            self.data.battery_soc,
+        )
 
     async def _poll_medium(self) -> None:
         """Poll medium-update data (system, WiFi, config, etc)."""
-        try:
-            # System data
-            await self.device.send_command(CMD_SYSTEM_DATA)
-            await asyncio.sleep(0.3)
+        # System data
+        await self._send_and_sleep(CMD_SYSTEM_DATA)
 
-            # WiFi SSID
-            await self.device.send_command(CMD_WIFI_SSID)
-            await asyncio.sleep(0.3)
+        # WiFi SSID
+        await self._send_and_sleep(CMD_WIFI_SSID)
 
-            # Config data
-            await self.device.send_command(CMD_CONFIG_DATA)
-            await asyncio.sleep(0.3)
+        # Config data
+        await self._send_and_sleep(CMD_CONFIG_DATA)
 
-            # CT polling rate
-            await self.device.send_command(CMD_CT_POLLING_RATE)
-            await asyncio.sleep(0.3)
+        # CT polling rate
+        await self._send_and_sleep(CMD_CT_POLLING_RATE)
 
-            # Local API status
-            await self.device.send_command(CMD_LOCAL_API_STATUS)
-            await asyncio.sleep(0.3)
+        # Local API status
+        await self._send_and_sleep(CMD_LOCAL_API_STATUS)
 
-            # Meter IP
-            await self.device.send_command(CMD_METER_IP, b"\x0B")
-            await asyncio.sleep(0.3)
+        # Meter IP
+        await self._send_and_sleep(CMD_METER_IP, b"\x0B")
 
-            # Network info
-            await self.device.send_command(CMD_NETWORK_INFO)
-            await asyncio.sleep(0.3)
-
-        except Exception as e:
-            _LOGGER.warning("Error polling medium data: %s", e)
+        # Network info
+        await self._send_and_sleep(CMD_NETWORK_INFO)
 
     async def _poll_slow(self) -> None:
         """Poll slow-update data (timer info, logs)."""
-        try:
-            # Timer info
-            await self.device.send_command(CMD_TIMER_INFO)
-            await asyncio.sleep(0.3)
+        # Timer info
+        await self._send_and_sleep(CMD_TIMER_INFO)
 
-            # Logs
-            await self.device.send_command(CMD_LOGS)
-            await asyncio.sleep(0.3)
-
-        except Exception as e:
-            _LOGGER.warning("Error polling slow data: %s", e)
+        # Logs
+        await self._send_and_sleep(CMD_LOGS)
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""
-        _LOGGER.info("Received notification from sender %s: %s", sender, bytes(data).hex())
+        _LOGGER.debug("Received notification from sender %s: %s", sender, bytes(data).hex())
         _LOGGER.debug("Data before parsing: battery_voltage=%s, battery_soc=%s",
                      self.data.battery_voltage, self.data.battery_soc)
 

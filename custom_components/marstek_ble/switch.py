@@ -1,11 +1,11 @@
 """Switch platform for Marstek BLE integration."""
 from __future__ import annotations
 
-import logging
+from typing import Callable
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,8 +21,9 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import MarstekDataUpdateCoordinator
+from .marstek_device import MarstekData
 
-_LOGGER = logging.getLogger(__name__)
+SwitchValueFn = Callable[[MarstekData], bool | None]
 
 
 async def async_setup_entry(
@@ -40,6 +41,7 @@ async def async_setup_entry(
             "out1_control",
             "Output 1 Control",
             CMD_OUTPUT_CONTROL,
+            value_fn=lambda data: data.out1_active,
         ),
         MarstekSwitch(
             coordinator,
@@ -47,6 +49,7 @@ async def async_setup_entry(
             "eps_mode",
             "EPS Mode",
             CMD_EPS_MODE,
+            value_fn=None,
         ),
         MarstekSwitch(
             coordinator,
@@ -54,6 +57,7 @@ async def async_setup_entry(
             "adaptive_mode",
             "Adaptive Mode",
             CMD_ADAPTIVE_MODE,
+            value_fn=lambda data: data.adaptive_mode_enabled,
         ),
         MarstekSwitch(
             coordinator,
@@ -61,6 +65,7 @@ async def async_setup_entry(
             "ac_input",
             "AC Input",
             CMD_AC_INPUT,
+            value_fn=None,
         ),
         MarstekSwitch(
             coordinator,
@@ -68,6 +73,7 @@ async def async_setup_entry(
             "generator",
             "Generator",
             CMD_GENERATOR,
+            value_fn=None,
         ),
         MarstekSwitch(
             coordinator,
@@ -75,13 +81,14 @@ async def async_setup_entry(
             "buzzer",
             "Buzzer",
             CMD_BUZZER,
+            value_fn=None,
         ),
     ]
 
     async_add_entities(entities)
 
 
-class MarstekSwitch(CoordinatorEntity, SwitchEntity):
+class MarstekSwitch(CoordinatorEntity[MarstekDataUpdateCoordinator], SwitchEntity):
     """Representation of a Marstek switch."""
 
     def __init__(
@@ -91,40 +98,39 @@ class MarstekSwitch(CoordinatorEntity, SwitchEntity):
         key: str,
         name: str,
         cmd: int,
+        value_fn: SwitchValueFn | None,
     ) -> None:
         """Initialize the switch."""
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
         self._cmd = cmd
+        self._value_fn = value_fn
+        self._assumed_state: bool | None = None
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._is_on = False
-
-    @property
-    def is_on(self) -> bool:
-        """Return true if switch is on."""
-        return self._is_on
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the switch on."""
-        _LOGGER.debug("Turning on: %s (cmd 0x%02X)", self._attr_name, self._cmd)
-
-        result = await self.coordinator.device.send_command(self._cmd, b"\x01")
-
-        if result:
-            self._is_on = True
+        if await self.coordinator.device.send_command(self._cmd, b"\x01"):
+            self._assumed_state = True
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the switch off."""
-        _LOGGER.debug("Turning off: %s (cmd 0x%02X)", self._attr_name, self._cmd)
-
-        result = await self.coordinator.device.send_command(self._cmd, b"\x00")
-
-        if result:
-            self._is_on = False
+        if await self.coordinator.device.send_command(self._cmd, b"\x00"):
+            self._assumed_state = False
             self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if switch is on."""
+        return self._current_state()
+
+    @property
+    def assumed_state(self) -> bool:
+        """Return true if the switch is assumed state."""
+        return self._value_fn is None
 
     @property
     def device_info(self):
@@ -133,3 +139,17 @@ class MarstekSwitch(CoordinatorEntity, SwitchEntity):
             "identifiers": {(DOMAIN, self.coordinator.ble_device.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.ble_device.address)},
         }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data."""
+        self._current_state()
+        super()._handle_coordinator_update()
+
+    def _current_state(self) -> bool | None:
+        """Return the most recent state, updating from coordinator when possible."""
+        if self._value_fn:
+            value = self._value_fn(self.coordinator.data)
+            if value is not None:
+                self._assumed_state = value
+        return self._assumed_state
