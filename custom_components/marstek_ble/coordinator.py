@@ -89,20 +89,24 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     ) -> bool:
         """Determine if polling is needed."""
         # Only poll if hass is running and we have a connectable device
-        return (
-            self.hass.state is CoreState.running
-            and bool(
-                bluetooth.async_ble_device_from_address(
-                    self.hass, service_info.device.address, connectable=True
-                )
-            )
+        hass_running = self.hass.state is CoreState.running
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, service_info.device.address, connectable=True
         )
+        needs_poll = hass_running and bool(ble_device)
+
+        _LOGGER.info(
+            "_needs_poll called: hass_running=%s, ble_device=%s, seconds_since_last_poll=%s, needs_poll=%s",
+            hass_running, ble_device is not None, seconds_since_last_poll, needs_poll
+        )
+
+        return needs_poll
 
     async def _async_update(
         self, service_info: bluetooth.BluetoothServiceInfoBleak
     ) -> None:
         """Poll the device for data."""
-        _LOGGER.debug("Updating Marstek data")
+        _LOGGER.info("_async_update called - Updating Marstek data from %s", service_info.device.address)
 
         # Update BLE device reference
         self.ble_device = service_info.device
@@ -230,11 +234,15 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         change: bluetooth.BluetoothChange,
     ) -> None:
         """Handle a Bluetooth event."""
+        _LOGGER.debug("_async_handle_bluetooth_event called: device=%s, change=%s",
+                     service_info.device.address, change)
+
         self.ble_device = service_info.device
 
         # Mark device as ready when we receive advertisements
         if not self._ready_event.is_set():
             self._ready_event.set()
+            _LOGGER.info("Device %s marked as ready", self.device_name)
 
         if self._was_unavailable:
             self._was_unavailable = False
