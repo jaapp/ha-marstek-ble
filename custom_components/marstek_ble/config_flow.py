@@ -12,6 +12,7 @@ from homeassistant.components.bluetooth import (
 )
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_POLL_INTERVAL,
@@ -185,9 +186,13 @@ class MarstekBLEOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_POLL_INTERVAL, default=current_interval
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_POLL_INTERVAL,
+                            max=MAX_POLL_INTERVAL,
+                            mode=selector.NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        ),
                     )
                 }
             ),
