@@ -473,9 +473,7 @@ class MarstekBLEDevice:
                         command_data.hex(),
                     )
 
-                    await self._client.write_gatt_char(
-                        CHAR_WRITE_UUID, command_data, response=True
-                    )
+                    await self._client.write_gatt_char(CHAR_WRITE_UUID, command_data)
 
                     self._reset_disconnect_timer()
 
