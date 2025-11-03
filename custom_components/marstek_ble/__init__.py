@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN
+from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +29,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Setting up Marstek BLE entry: %s", entry.data)
 
     address: str = entry.data[CONF_ADDRESS]
+    poll_interval: int = entry.options.get(
+        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+    )
 
     # Get BLE device
     ble_device = bluetooth.async_ble_device_from_address(
@@ -46,10 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         address=address,
         device=ble_device,
         device_name=entry.data.get(CONF_NAME, entry.title),
+        poll_interval=poll_interval,
     )
 
     # Start coordinator and wait for it to be ready
     entry.async_on_unload(coordinator.async_start())
+    entry.async_on_unload(entry.add_update_listener(_async_handle_entry_update))
 
     if not await coordinator.async_wait_ready():
         raise ConfigEntryNotReady(
@@ -77,3 +82,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle updates to the config entry options."""
+    coordinator: MarstekDataUpdateCoordinator | None = entry.runtime_data
+    if coordinator is None:
+        return
+
+    poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    coordinator.set_poll_interval(poll_interval)

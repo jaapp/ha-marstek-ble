@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import timedelta
 
 from bleak.backends.device import BLEDevice
@@ -30,8 +31,12 @@ from .const import (
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
     CMD_WIFI_SSID,
+    DEFAULT_POLL_INTERVAL,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
     SERVICE_UUID,
-    UPDATE_INTERVAL_FAST,
+    UPDATE_INTERVAL_MEDIUM,
+    UPDATE_INTERVAL_SLOW,
 )
 from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
@@ -48,6 +53,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         address: str,
         device: BLEDevice,
         device_name: str,
+        poll_interval: int = DEFAULT_POLL_INTERVAL,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -59,7 +65,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             poll_method=self._async_update,
             connectable=True,
         )
-        self.update_interval = timedelta(seconds=UPDATE_INTERVAL_FAST)
         self.ble_device = device
         self.device_name = device_name
         self._protocol = MarstekProtocol
@@ -70,6 +75,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._slow_poll_count = 0
         self._ready_event = asyncio.Event()
         self._was_unavailable = True
+        self._poll_interval = self._sanitize_poll_interval(poll_interval)
+        self._medium_poll_cycle = 1
+        self._slow_poll_cycle = 1
+        self._update_poll_schedule()
 
         # Create persistent device object for command sending (SwitchBot pattern)
         self.device = MarstekBLEDevice(
@@ -89,6 +98,58 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             raise BleakError(f"Failed to send command 0x{command:02X}")
         if delay:
             await asyncio.sleep(delay)
+
+    def _sanitize_poll_interval(self, poll_interval: int) -> int:
+        """Clamp the polling interval to supported bounds."""
+        if poll_interval < MIN_POLL_INTERVAL:
+            _LOGGER.debug(
+                "Requested poll interval %s below minimum; clamping to %s",
+                poll_interval,
+                MIN_POLL_INTERVAL,
+            )
+            return MIN_POLL_INTERVAL
+        if poll_interval > MAX_POLL_INTERVAL:
+            _LOGGER.debug(
+                "Requested poll interval %s above maximum; clamping to %s",
+                poll_interval,
+                MAX_POLL_INTERVAL,
+            )
+            return MAX_POLL_INTERVAL
+        return poll_interval
+
+    def _update_poll_schedule(self) -> None:
+        """Recalculate polling schedule derived from the fast interval."""
+        self.update_interval = timedelta(seconds=self._poll_interval)
+        self._medium_poll_cycle = max(
+            1, math.ceil(UPDATE_INTERVAL_MEDIUM / self._poll_interval)
+        )
+        self._slow_poll_cycle = max(
+            1, math.ceil(UPDATE_INTERVAL_SLOW / self._poll_interval)
+        )
+        _LOGGER.debug(
+            "Polling schedule updated: fast=%ss, medium every %s updates, slow every %s updates",
+            self._poll_interval,
+            self._medium_poll_cycle,
+            self._slow_poll_cycle,
+        )
+
+    def set_poll_interval(self, poll_interval: int) -> None:
+        """Update the polling interval."""
+        sanitized = self._sanitize_poll_interval(poll_interval)
+        if sanitized == self._poll_interval:
+            return
+
+        _LOGGER.info(
+            "Updating polling interval for %s from %ss to %ss",
+            self.device_name,
+            self._poll_interval,
+            sanitized,
+        )
+        self._poll_interval = sanitized
+        self._fast_poll_count = 0
+        self._medium_poll_count = 0
+        self._slow_poll_count = 0
+        self._update_poll_schedule()
 
     @callback
     def _needs_poll(
@@ -125,17 +186,17 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # Use persistent device object for polling (SwitchBot pattern)
         # The device manages its own connection lifecycle
 
-        # Fast poll (every update - 10s)
+        # Fast poll (runs at the configured base interval)
         await self._poll_fast()
         self._fast_poll_count += 1
 
-        # Medium poll (every 6th update - 60s)
-        if self._fast_poll_count % 6 == 0:
+        # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
+        if self._fast_poll_count % self._medium_poll_cycle == 0:
             await self._poll_medium()
             self._medium_poll_count += 1
 
-        # Slow poll (every 30th update - 5 min)
-        if self._fast_poll_count % 30 == 0:
+        # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
+        if self._fast_poll_count % self._slow_poll_cycle == 0:
             await self._poll_slow()
             self._slow_poll_count += 1
 

@@ -9,6 +9,7 @@ Home Assistant integration for Marstek Venus E energy storage systems via Blueto
 - **Power control**: Output control, EPS mode, power limits, adaptive mode
 - **Energy tracking**: Integration with Home Assistant Energy Dashboard
 - **BLE Proxy support**: Extend range using ESPHome BLE proxies
+- **Configurable polling**: Adjust update interval to balance responsiveness and BLE traffic
 - **Local operation**: No cloud connectivity required
 
 ## Installation
@@ -37,6 +38,7 @@ Or:
 3. Search for "Marstek BLE"
 4. Select your battery from the discovered devices
 5. Click **Submit**
+6. (Optional) Open the integration options to tune the polling interval
 
 Repeat for each battery you want to add.
 

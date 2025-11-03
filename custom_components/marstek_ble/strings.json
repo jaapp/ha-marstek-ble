@@ -18,5 +18,15 @@
       "already_configured": "Device is already configured",
       "no_devices_found": "No Marstek devices found"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Marstek BLE Options",
+        "data": {
+          "poll_interval": "Polling interval (seconds)"
+        }
+      }
+    }
   }
 }
