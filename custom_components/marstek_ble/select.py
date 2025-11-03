@@ -7,6 +7,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -73,7 +74,7 @@ class MarstekSelect(CoordinatorEntity, SelectEntity):
         self._cmd = cmd
         self._options_map = options_map
         self._attr_options = list(options_map.keys())
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_current_option = self._attr_options[0]
 
@@ -84,16 +85,9 @@ class MarstekSelect(CoordinatorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        _LOGGER.debug("Selecting option: %s = %s (cmd 0x%02X)", self._attr_name, option, self._cmd)
-
-        if not self.coordinator.client or not self.coordinator.client.is_connected:
-            _LOGGER.warning("Cannot send command: device not connected")
-            return
-
-        payload = self._options_map[option]
-        await self.coordinator._write_command(self._cmd, payload)
-        self._attr_current_option = option
-        self.async_write_ha_state()
+        _LOGGER.warning("Select %s option %s selected but command sending not yet implemented", self._attr_name, option)
+        # TODO: Implement command sending with proper BLE connection management
+        return
 
     @property
     def device_info(self):

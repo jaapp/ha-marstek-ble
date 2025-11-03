@@ -7,6 +7,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -96,7 +97,7 @@ class MarstekSwitch(CoordinatorEntity, SwitchEntity):
         self._key = key
         self._attr_name = name
         self._cmd = cmd
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._is_on = False
 
@@ -107,27 +108,15 @@ class MarstekSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the switch on."""
-        _LOGGER.debug("Turning on: %s (cmd 0x%02X)", self._attr_name, self._cmd)
-
-        if not self.coordinator.client or not self.coordinator.client.is_connected:
-            _LOGGER.warning("Cannot send command: device not connected")
-            return
-
-        await self.coordinator._write_command(self._cmd, b"\x01")
-        self._is_on = True
-        self.async_write_ha_state()
+        _LOGGER.warning("Switch %s turn on requested but command sending not yet implemented", self._attr_name)
+        # TODO: Implement command sending with proper BLE connection management
+        return
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the switch off."""
-        _LOGGER.debug("Turning off: %s (cmd 0x%02X)", self._attr_name, self._cmd)
-
-        if not self.coordinator.client or not self.coordinator.client.is_connected:
-            _LOGGER.warning("Cannot send command: device not connected")
-            return
-
-        await self.coordinator._write_command(self._cmd, b"\x00")
-        self._is_on = False
-        self.async_write_ha_state()
+        _LOGGER.warning("Switch %s turn off requested but command sending not yet implemented", self._attr_name)
+        # TODO: Implement command sending with proper BLE connection management
+        return
 
     @property
     def device_info(self):

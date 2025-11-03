@@ -29,15 +29,8 @@ async def async_setup_entry(
     coordinator: MarstekDataUpdateCoordinator = entry.runtime_data
 
     entities = [
-        MarstekBinarySensor(
-            coordinator,
-            entry,
-            "ble_connected",
-            "BLE Connected",
-            lambda data: coordinator.client and coordinator.client.is_connected if coordinator.client else False,
-            BinarySensorDeviceClass.CONNECTIVITY,
-            entity_category=EntityCategory.DIAGNOSTIC,
-        ),
+        # Note: BLE Connected sensor removed - coordinator doesn't maintain persistent client connection
+        # TODO: Add proper connectivity tracking if needed
         MarstekBinarySensor(
             coordinator,
             entry,

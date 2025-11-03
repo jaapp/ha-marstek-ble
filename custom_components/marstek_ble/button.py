@@ -7,6 +7,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -94,18 +95,14 @@ class MarstekButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = name
         self._cmd = cmd
         self._payload = payload
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        _LOGGER.debug("Button pressed: %s (cmd 0x%02X)", self._attr_name, self._cmd)
-
-        if not self.coordinator.client or not self.coordinator.client.is_connected:
-            _LOGGER.warning("Cannot send command: device not connected")
-            return
-
-        await self.coordinator._write_command(self._cmd, self._payload)
+        _LOGGER.warning("Button %s pressed but command sending not yet implemented", self._attr_name)
+        # TODO: Implement command sending with proper BLE connection management
+        return
 
     @property
     def device_info(self):
