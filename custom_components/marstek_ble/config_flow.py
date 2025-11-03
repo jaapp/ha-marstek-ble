@@ -30,6 +30,11 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> MarstekBLEOptionsFlow:
+        """Return the options flow handler."""
+        return MarstekBLEOptionsFlow(config_entry)
+
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._discovery_info: BluetoothServiceInfoBleak | None = None
@@ -187,8 +192,3 @@ class MarstekBLEOptionsFlow(OptionsFlow):
                 }
             ),
         )
-
-
-async def async_get_options_flow(config_entry: ConfigEntry) -> MarstekBLEOptionsFlow:
-    """Return the options flow handler."""
-    return MarstekBLEOptionsFlow(config_entry)
