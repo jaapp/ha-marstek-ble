@@ -97,16 +97,16 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         seconds_since_last_poll: float | None,
     ) -> bool:
         """Determine if polling is needed."""
-        # Only poll if hass is running and we have a connectable device
-        hass_running = self.hass.state is CoreState.running
+        # Only poll if HA is at least starting and we have a connectable device
+        hass_ready = self.hass.state in (CoreState.starting, CoreState.running)
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, service_info.device.address, connectable=True
         )
-        needs_poll = hass_running and bool(ble_device)
+        needs_poll = hass_ready and bool(ble_device)
 
         _LOGGER.debug(
-            "_needs_poll called: hass_running=%s, ble_device=%s, seconds_since_last_poll=%s, needs_poll=%s",
-            hass_running, ble_device is not None, seconds_since_last_poll, needs_poll
+            "_needs_poll called: hass_ready=%s, ble_device=%s, seconds_since_last_poll=%s, needs_poll=%s",
+            hass_ready, ble_device is not None, seconds_since_last_poll, needs_poll
         )
 
         return needs_poll
