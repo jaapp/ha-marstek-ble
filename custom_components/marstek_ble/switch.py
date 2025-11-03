@@ -108,15 +108,23 @@ class MarstekSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the switch on."""
-        _LOGGER.warning("Switch %s turn on requested but command sending not yet implemented", self._attr_name)
-        # TODO: Implement command sending with proper BLE connection management
-        return
+        _LOGGER.debug("Turning on: %s (cmd 0x%02X)", self._attr_name, self._cmd)
+
+        result = await self.coordinator.device.send_command(self._cmd, b"\x01")
+
+        if result:
+            self._is_on = True
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the switch off."""
-        _LOGGER.warning("Switch %s turn off requested but command sending not yet implemented", self._attr_name)
-        # TODO: Implement command sending with proper BLE connection management
-        return
+        _LOGGER.debug("Turning off: %s (cmd 0x%02X)", self._attr_name, self._cmd)
+
+        result = await self.coordinator.device.send_command(self._cmd, b"\x00")
+
+        if result:
+            self._is_on = False
+            self.async_write_ha_state()
 
     @property
     def device_info(self):

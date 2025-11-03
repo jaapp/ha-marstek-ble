@@ -33,7 +33,7 @@ from .const import (
     SERVICE_UUID,
     UPDATE_INTERVAL_FAST,
 )
-from .marstek_device import MarstekData, MarstekProtocol
+from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +70,15 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._slow_poll_count = 0
         self._ready_event = asyncio.Event()
         self._was_unavailable = True
+
+        # Create persistent device object for command sending (SwitchBot pattern)
+        self.device = MarstekBLEDevice(
+            ble_device=device,
+            device_name=device_name,
+            ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                self.hass, address, connectable=True
+            ),
+        )
 
     @callback
     def _needs_poll(

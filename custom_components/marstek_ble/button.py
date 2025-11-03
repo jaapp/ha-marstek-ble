@@ -100,9 +100,8 @@ class MarstekButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        _LOGGER.warning("Button %s pressed but command sending not yet implemented", self._attr_name)
-        # TODO: Implement command sending with proper BLE connection management
-        return
+        _LOGGER.debug("Button pressed: %s (cmd 0x%02X)", self._attr_name, self._cmd)
+        await self.coordinator.device.send_command(self._cmd, self._payload)
 
     @property
     def device_info(self):

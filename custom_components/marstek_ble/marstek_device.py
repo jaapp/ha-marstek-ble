@@ -1,12 +1,21 @@
 """Marstek BLE protocol handler."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
+
+from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 _LOGGER = logging.getLogger(__name__)
+
+# BLE UUIDs
+CHAR_WRITE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
+CHAR_NOTIFY_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
 
 
 @dataclass
@@ -309,3 +318,188 @@ class MarstekProtocol:
         device_data.local_api_status = f"{enabled}/{port}"
 
         return True
+
+
+class MarstekBLEDevice:
+    """Manages BLE connection and commands for Marstek device.
+
+    Following the SwitchBot pattern - this class handles:
+    - Establishing and maintaining BLE connections
+    - Sending commands to the device
+    - Managing connection lifecycle
+    """
+
+    def __init__(
+        self,
+        ble_device: BLEDevice,
+        device_name: str,
+        ble_device_callback: Callable[[], BLEDevice] | None = None,
+    ) -> None:
+        """Initialize the Marstek BLE device.
+
+        Args:
+            ble_device: The BLE device object
+            device_name: Human-readable device name
+            ble_device_callback: Callback to get updated BLE device (for reconnection)
+        """
+        self._ble_device = ble_device
+        self._device_name = device_name
+        self._ble_device_callback = ble_device_callback
+        self._client: BleakClientWithServiceCache | None = None
+        self._connect_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
+        self._disconnect_timer: asyncio.TimerHandle | None = None
+        self._expected_disconnect = False
+
+    @property
+    def name(self) -> str:
+        """Return the device name."""
+        return self._device_name
+
+    @property
+    def address(self) -> str:
+        """Return the device address."""
+        return self._ble_device.address
+
+    async def _ensure_connected(self) -> None:
+        """Ensure we have an active BLE connection."""
+        if self._client and self._client.is_connected:
+            _LOGGER.debug("%s: Already connected", self._device_name)
+            return
+
+        async with self._connect_lock:
+            # Double-check after acquiring lock
+            if self._client and self._client.is_connected:
+                return
+
+            _LOGGER.debug("%s: Establishing connection", self._device_name)
+
+            # Get fresh BLE device if callback available
+            if self._ble_device_callback:
+                self._ble_device = self._ble_device_callback()
+
+            try:
+                self._client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    self._ble_device,
+                    self._device_name,
+                    disconnected_callback=self._on_disconnect,
+                    use_services_cache=True,
+                    ble_device_callback=self._ble_device_callback,
+                )
+                _LOGGER.debug("%s: Connected successfully", self._device_name)
+            except (BleakError, TimeoutError) as ex:
+                _LOGGER.warning(
+                    "%s: Failed to connect: %s", self._device_name, ex
+                )
+                raise
+
+    def _on_disconnect(self, client: BleakClientWithServiceCache) -> None:
+        """Handle disconnection."""
+        if self._expected_disconnect:
+            _LOGGER.debug("%s: Expected disconnect", self._device_name)
+            self._expected_disconnect = False
+        else:
+            _LOGGER.warning("%s: Unexpected disconnect", self._device_name)
+        self._client = None
+
+    def _reset_disconnect_timer(self) -> None:
+        """Reset the disconnect timer."""
+        if self._disconnect_timer:
+            self._disconnect_timer.cancel()
+
+        # Disconnect after 30 seconds of inactivity
+        loop = asyncio.get_event_loop()
+        self._disconnect_timer = loop.call_later(
+            30.0, lambda: asyncio.create_task(self._execute_disconnect())
+        )
+
+    async def _execute_disconnect(self) -> None:
+        """Execute disconnection."""
+        async with self._connect_lock:
+            if self._client and self._client.is_connected:
+                _LOGGER.debug("%s: Disconnecting due to inactivity", self._device_name)
+                self._expected_disconnect = True
+                await self._client.disconnect()
+            self._disconnect_timer = None
+
+    async def send_command(
+        self, cmd: int, payload: bytes = b"", retry: int = 3
+    ) -> bool:
+        """Send a command to the device.
+
+        Args:
+            cmd: Command byte
+            payload: Command payload
+            retry: Number of retry attempts
+
+        Returns:
+            True if command was sent successfully
+        """
+        async with self._operation_lock:
+            for attempt in range(retry):
+                try:
+                    await self._ensure_connected()
+
+                    command_data = MarstekProtocol.build_command(cmd, payload)
+                    _LOGGER.debug(
+                        "%s: Sending command 0x%02X (attempt %d/%d): %s",
+                        self._device_name,
+                        cmd,
+                        attempt + 1,
+                        retry,
+                        command_data.hex(),
+                    )
+
+                    await self._client.write_gatt_char(
+                        CHAR_WRITE_UUID, command_data, response=True
+                    )
+
+                    self._reset_disconnect_timer()
+
+                    _LOGGER.debug(
+                        "%s: Command 0x%02X sent successfully", self._device_name, cmd
+                    )
+                    return True
+
+                except (BleakError, TimeoutError) as ex:
+                    _LOGGER.warning(
+                        "%s: Failed to send command 0x%02X (attempt %d/%d): %s",
+                        self._device_name,
+                        cmd,
+                        attempt + 1,
+                        retry,
+                        ex,
+                    )
+                    # Force reconnect on next attempt
+                    if self._client:
+                        self._expected_disconnect = True
+                        try:
+                            await self._client.disconnect()
+                        except Exception:
+                            pass
+                        self._client = None
+
+                    if attempt < retry - 1:
+                        await asyncio.sleep(0.5)
+
+            _LOGGER.error(
+                "%s: Failed to send command 0x%02X after %d attempts",
+                self._device_name,
+                cmd,
+                retry,
+            )
+            return False
+
+    async def disconnect(self) -> None:
+        """Disconnect from the device."""
+        if self._disconnect_timer:
+            self._disconnect_timer.cancel()
+            self._disconnect_timer = None
+
+        async with self._connect_lock:
+            if self._client and self._client.is_connected:
+                _LOGGER.debug("%s: Disconnecting", self._device_name)
+                self._expected_disconnect = True
+                await self._client.disconnect()
+            self._client = None

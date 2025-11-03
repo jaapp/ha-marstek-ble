@@ -85,9 +85,14 @@ class MarstekSelect(CoordinatorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        _LOGGER.warning("Select %s option %s selected but command sending not yet implemented", self._attr_name, option)
-        # TODO: Implement command sending with proper BLE connection management
-        return
+        _LOGGER.debug("Selecting option: %s = %s (cmd 0x%02X)", self._attr_name, option, self._cmd)
+
+        payload = self._options_map[option]
+        result = await self.coordinator.device.send_command(self._cmd, payload)
+
+        if result:
+            self._attr_current_option = option
+            self.async_write_ha_state()
 
     @property
     def device_info(self):
