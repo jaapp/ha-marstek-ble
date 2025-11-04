@@ -226,6 +226,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     async def _poll_medium(self) -> None:
         """Poll medium-update data (system, WiFi, config, etc)."""
+        # Device info (type, ID, MAC, firmware version)
+        await self._send_and_sleep(CMD_DEVICE_INFO)
+
         # System data
         await self._send_and_sleep(CMD_SYSTEM_DATA)
 
