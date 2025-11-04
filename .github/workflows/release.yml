@@ -1,4 +1,4 @@
-name: Release Validation
+name: Release Validation & Creation
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
   release:
     types:
       - published
+
+permissions:
+  contents: write  # needed for creating releases
 
 jobs:
   manifest-version:
@@ -48,3 +51,18 @@ jobs:
             echo "Manifest version must match the release tag (without leading 'v')."
             exit 1
           fi
+
+  create-release:
+    name: Create GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: manifest-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
