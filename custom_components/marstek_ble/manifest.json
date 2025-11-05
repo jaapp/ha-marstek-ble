@@ -9,13 +9,19 @@
       "local_name": "MST_VNSE3_*"
     }
   ],
-  "codeowners": ["@jaapp"],
+  "codeowners": [
+    "@jaapp"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth", "integration", "utility_meter"],
+  "dependencies": [
+    "bluetooth",
+    "integration",
+    "utility_meter"
+  ],
   "documentation": "https://github.com/jaapp/ha-marstek-ble",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/jaapp/ha-marstek-ble/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.3"
 }
