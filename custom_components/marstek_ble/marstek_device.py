@@ -399,6 +399,10 @@ class MarstekBLEDevice:
         self._total_commands_success = 0
         self._total_commands_failure = 0
         self._last_command_error: str | None = None
+        # Response waiting mechanism (like Venus Monitor)
+        self._pending_command: int | None = None
+        self._response_event: asyncio.Event | None = None
+        self._response_data: bytes | None = None
 
     @property
     def name(self) -> str:
@@ -513,6 +517,11 @@ class MarstekBLEDevice:
                 try:
                     await self._ensure_connected()
 
+                    # Setup response waiting (Venus Monitor pattern)
+                    self._pending_command = cmd
+                    self._response_event = asyncio.Event()
+                    self._response_data = None
+
                     _LOGGER.debug(
                         "%s: Sending command 0x%02X (attempt %d/%d): %s",
                         self._device_name,
@@ -526,9 +535,26 @@ class MarstekBLEDevice:
 
                     self._reset_disconnect_timer()
 
-                    _LOGGER.debug(
-                        "%s: Command 0x%02X sent successfully", self._device_name, cmd
-                    )
+                    # Wait for response (timeout 2000ms like Venus Monitor)
+                    try:
+                        await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
+                        _LOGGER.debug(
+                            "%s: Command 0x%02X sent and response received",
+                            self._device_name,
+                            cmd
+                        )
+                    except asyncio.TimeoutError:
+                        _LOGGER.warning(
+                            "%s: Timeout waiting for response to command 0x%02X",
+                            self._device_name,
+                            cmd
+                        )
+                        # Continue anyway - device might not respond to some commands
+                    finally:
+                        # Clear waiting state
+                        self._pending_command = None
+                        self._response_event = None
+
                     self._record_command_result(
                         cmd=cmd,
                         frame=command_data,
@@ -666,6 +692,17 @@ class MarstekBLEDevice:
             stats = self._command_stats[command]
             stats["last_notification"] = timestamp
             stats["last_notification_hex"] = data.hex()
+
+            # Signal response received if waiting (Venus Monitor pattern)
+            if self._pending_command == command and self._response_event:
+                _LOGGER.debug(
+                    "%s: Received response for command 0x%02X (%d bytes)",
+                    self._device_name,
+                    command,
+                    len(data)
+                )
+                self._response_data = data
+                self._response_event.set()
 
     @staticmethod
     def _iso_timestamp(timestamp: float | None) -> str | None:
