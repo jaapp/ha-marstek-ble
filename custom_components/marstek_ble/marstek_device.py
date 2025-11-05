@@ -166,9 +166,33 @@ class MarstekProtocol:
     @staticmethod
     def _parse_runtime_info(payload: bytes, device_data: MarstekData) -> bool:
         """Parse runtime info (0x03)."""
-        if len(payload) < 60:
+        # Support both long format (109 bytes) and short format (37 bytes)
+        if len(payload) < 37:
+            _LOGGER.warning("Runtime info payload too short: %d bytes", len(payload))
             return False
 
+        # Short format (37 bytes) - older firmware or different model
+        if len(payload) < 60:
+            _LOGGER.debug("Parsing short runtime info format (%d bytes)", len(payload))
+            # Try to extract what we can from the shorter format
+            # Based on observed data, the short format has limited fields
+            try:
+                # These offsets are tentative and may need adjustment
+                if len(payload) >= 16:
+                    device_data.wifi_connected = (payload[15] & 0x01) != 0
+                    device_data.mqtt_connected = (payload[15] & 0x02) != 0
+                if len(payload) >= 17:
+                    device_data.out1_active = payload[16] != 0
+                if len(payload) >= 22:
+                    device_data.out1_power = float(struct.unpack("<H", payload[20:22])[0])
+                if len(payload) >= 29:
+                    device_data.extern1_connected = payload[28] != 0
+                return True
+            except Exception as e:
+                _LOGGER.warning("Error parsing short runtime info: %s", e)
+                return False
+
+        # Long format (60+ bytes) - standard firmware
         device_data.out1_power = float(struct.unpack("<H", payload[20:22])[0])
         device_data.temp_low = struct.unpack("<h", payload[33:35])[0] / 10.0
         device_data.temp_high = struct.unpack("<h", payload[35:37])[0] / 10.0
