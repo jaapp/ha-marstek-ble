@@ -216,11 +216,11 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             self.data.battery_soc,
         )
 
-        # Runtime info
-        await self._send_and_sleep(CMD_RUNTIME_INFO)
+        # Runtime info - now waits for actual response (Venus Monitor pattern)
+        await self._send_and_sleep(CMD_RUNTIME_INFO, delay=0.1)
 
-        # BMS data
-        await self._send_and_sleep(CMD_BMS_DATA)
+        # BMS data - now waits for actual response
+        await self._send_and_sleep(CMD_BMS_DATA, delay=0.1)
 
         _LOGGER.debug(
             "[%s/%s] Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
