@@ -55,6 +55,20 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
 
+        # Check if a device with the same name is already configured
+        # This prevents duplicate discovery when devices use random MAC addresses
+        device_name = discovery_info.name
+        if device_name:
+            for entry in self._async_current_entries():
+                if entry.data.get(CONF_NAME) == device_name:
+                    _LOGGER.info(
+                        "Device %s already configured with different address %s, aborting discovery of %s",
+                        device_name,
+                        entry.data.get(CONF_ADDRESS),
+                        discovery_info.address,
+                    )
+                    return self.async_abort(reason="already_configured")
+
         self._discovery_info = discovery_info
 
         # Set title placeholders for discovery card
@@ -113,6 +127,13 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         # Discover devices
         current_addresses = self._async_current_ids()
 
+        # Get list of configured device names to prevent duplicates
+        configured_names = {
+            entry.data.get(CONF_NAME)
+            for entry in self._async_current_entries()
+            if entry.data.get(CONF_NAME)
+        }
+
         for discovery_info in async_discovered_service_info(self.hass):
             _LOGGER.debug(
                 "Checking discovered device: %s (%s)",
@@ -120,9 +141,19 @@ class MarstekBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 discovery_info.address,
             )
 
-            # Check if device is already configured
+            # Check if device is already configured by address
             if discovery_info.address in current_addresses:
                 _LOGGER.debug("Device already configured: %s", discovery_info.name)
+                continue
+
+            # Check if device with same name is already configured
+            # This prevents duplicate discovery when devices use random MAC addresses
+            if discovery_info.name and discovery_info.name in configured_names:
+                _LOGGER.debug(
+                    "Device with name %s already configured, skipping address %s",
+                    discovery_info.name,
+                    discovery_info.address,
+                )
                 continue
 
             # Check if device name matches battery prefixes (not CT devices)
