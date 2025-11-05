@@ -9,15 +9,104 @@ on:
       - published
 
 permissions:
-  contents: write  # needed for creating releases
+  contents: write  # needed for creating releases and updating tags
 
 jobs:
-  manifest-version:
-    name: Verify Manifest Version
+  sync-manifest-version:
+    name: Sync Manifest Version with Tag
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update manifest version
+        id: update
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          TRIMMED_TAG="${TAG_NAME#v}"
+          MANIFEST_FILE="custom_components/marstek_ble/manifest.json"
+          CURRENT_VERSION=$(jq -r '.version' "$MANIFEST_FILE")
+
+          echo "Tag: ${TAG_NAME}"
+          echo "Target version: ${TRIMMED_TAG}"
+          echo "Current manifest version: ${CURRENT_VERSION}"
+
+          if [ "${CURRENT_VERSION}" = "${TRIMMED_TAG}" ]; then
+            echo "Manifest version already matches tag. No update needed."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Updating manifest version from ${CURRENT_VERSION} to ${TRIMMED_TAG}"
+            jq --arg version "${TRIMMED_TAG}" '.version = $version' "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp"
+            mv "${MANIFEST_FILE}.tmp" "$MANIFEST_FILE"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and update tag
+        if: steps.update.outputs.updated == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          TRIMMED_TAG="${TAG_NAME#v}"
+
+          # Commit the manifest change
+          git add custom_components/marstek_ble/manifest.json
+          git commit -m "chore: bump version to ${TRIMMED_TAG}"
+
+          # Determine the base branch (the branch the tag was likely created from)
+          # First, try to find branches that contain the parent commit
+          PARENT_COMMIT=$(git rev-parse HEAD~1)
+          BRANCHES=$(git branch -r --contains "${PARENT_COMMIT}" | grep -v HEAD | sed 's/origin\///' | tr -d ' ')
+
+          # Prefer main or master if available, otherwise use the first branch found
+          if echo "$BRANCHES" | grep -q "^main$"; then
+            BASE_BRANCH="main"
+          elif echo "$BRANCHES" | grep -q "^master$"; then
+            BASE_BRANCH="master"
+          elif [ -n "$BRANCHES" ]; then
+            BASE_BRANCH=$(echo "$BRANCHES" | head -n1)
+          else
+            # Fallback to default branch
+            BASE_BRANCH="${{ github.event.repository.default_branch }}"
+          fi
+
+          echo "Pushing commit to branch: ${BASE_BRANCH}"
+          git push origin HEAD:refs/heads/${BASE_BRANCH}
+
+          # Delete and recreate the tag at the new commit
+          git tag -d "${TAG_NAME}"
+          git tag "${TAG_NAME}"
+          git push origin "${TAG_NAME}" --force
+
+          echo "Successfully updated manifest version to ${TRIMMED_TAG} and moved tag ${TAG_NAME}"
+
+  manifest-version:
+    name: Verify Manifest Version
+    needs: sync-manifest-version
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest tags
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch --tags --force
+          git checkout ${{ github.ref_name }}
 
       - name: Determine release tag
         id: tag
@@ -60,6 +149,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest tags
+        run: |
+          git fetch --tags --force
+          git checkout ${{ github.ref_name }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
