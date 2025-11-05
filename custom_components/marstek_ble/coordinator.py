@@ -216,11 +216,12 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             self.data.battery_soc,
         )
 
-        # Runtime info
-        await self._send_and_sleep(CMD_RUNTIME_INFO)
+        # Runtime info - increase delay to allow device to respond fully
+        # HMG-50 devices need more time to prepare full response
+        await self._send_and_sleep(CMD_RUNTIME_INFO, delay=1.0)
 
-        # BMS data
-        await self._send_and_sleep(CMD_BMS_DATA)
+        # BMS data - increase delay
+        await self._send_and_sleep(CMD_BMS_DATA, delay=1.0)
 
         _LOGGER.debug(
             "[%s/%s] Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
