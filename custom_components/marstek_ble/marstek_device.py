@@ -171,22 +171,34 @@ class MarstekProtocol:
             _LOGGER.warning("Runtime info payload too short: %d bytes", len(payload))
             return False
 
-        # Short format (37 bytes) - older firmware or different model
+        # Short format (37 bytes) - truncated/incomplete response
         if len(payload) < 60:
-            _LOGGER.debug("Parsing short runtime info format (%d bytes)", len(payload))
+            _LOGGER.warning(
+                "Received SHORT runtime info format (%d bytes) - device may not be ready. "
+                "Expected 109+ bytes. Payload hex: %s",
+                len(payload),
+                payload.hex()
+            )
             # Try to extract what we can from the shorter format
-            # Based on observed data, the short format has limited fields
+            # Note: Short format does NOT contain battery data (voltage/SOC/current)
+            # Battery data only comes from BMS command (0x14)
             try:
                 # These offsets are tentative and may need adjustment
                 if len(payload) >= 16:
                     device_data.wifi_connected = (payload[15] & 0x01) != 0
                     device_data.mqtt_connected = (payload[15] & 0x02) != 0
+                    _LOGGER.debug("Short format: wifi=%s, mqtt=%s", device_data.wifi_connected, device_data.mqtt_connected)
                 if len(payload) >= 17:
                     device_data.out1_active = payload[16] != 0
+                    _LOGGER.debug("Short format: out1_active=%s", device_data.out1_active)
                 if len(payload) >= 22:
                     device_data.out1_power = float(struct.unpack("<H", payload[20:22])[0])
+                    _LOGGER.debug("Short format: out1_power=%s", device_data.out1_power)
                 if len(payload) >= 29:
                     device_data.extern1_connected = payload[28] != 0
+                _LOGGER.info(
+                    "Parsed short runtime info (no battery data available in this format)"
+                )
                 return True
             except Exception as e:
                 _LOGGER.warning("Error parsing short runtime info: %s", e)
@@ -450,6 +462,12 @@ class MarstekBLEDevice:
                     )
                     self._notifications_started = True
                     _LOGGER.debug("%s: Notifications started successfully", self._device_name)
+
+                    # Wait for device to stabilize (HMG-50 needs time to prepare full responses)
+                    # Web tool waits ~3 seconds after connection before sending commands
+                    _LOGGER.debug("%s: Waiting 3s for device to stabilize...", self._device_name)
+                    await asyncio.sleep(3.0)
+                    _LOGGER.debug("%s: Device ready", self._device_name)
                 else:
                     _LOGGER.debug(
                         "%s: Notifications already started or no callback (callback=%s, started=%s)",
@@ -535,9 +553,9 @@ class MarstekBLEDevice:
 
                     self._reset_disconnect_timer()
 
-                    # Wait for response (timeout 2000ms like Venus Monitor)
+                    # Wait for response (timeout 6000ms - HMG-50 can take 5+ seconds!)
                     try:
-                        await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
+                        await asyncio.wait_for(self._response_event.wait(), timeout=6.0)
                         _LOGGER.debug(
                             "%s: Command 0x%02X sent and response received",
                             self._device_name,
@@ -545,7 +563,7 @@ class MarstekBLEDevice:
                         )
                     except asyncio.TimeoutError:
                         _LOGGER.warning(
-                            "%s: Timeout waiting for response to command 0x%02X",
+                            "%s: Timeout waiting for response to command 0x%02X (waited 6s)",
                             self._device_name,
                             cmd
                         )
