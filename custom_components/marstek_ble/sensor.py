@@ -225,6 +225,40 @@ async def async_setup_entry(
             SensorDeviceClass.TEMPERATURE,
             SensorStateClass.MEASUREMENT,
         ),
+        # Diagnostic sensors
+        MarstekSensor(
+            coordinator,
+            entry,
+            "system_status",
+            "System Status",
+            lambda data: data.system_status,
+            None,
+            None,
+            SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "config_mode",
+            "Config Mode",
+            lambda data: data.config_mode,
+            None,
+            None,
+            SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "ct_polling_rate",
+            "CT Polling Rate",
+            lambda data: data.ct_polling_rate,
+            None,
+            None,
+            SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
     ]
 
     # Add cell voltage sensors
@@ -264,30 +298,6 @@ async def async_setup_entry(
                     and data.battery_voltage * data.battery_current < -5
                     else "inactive"
                 ),
-            ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
-                "system_status",
-                "System Status",
-                lambda data: f"0x{data.system_status:02X}" if data.system_status is not None else None,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
-                "config_mode",
-                "Config Mode",
-                lambda data: f"0x{data.config_mode:02X}" if data.config_mode is not None else None,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
-                "ct_polling_rate",
-                "CT Polling Rate",
-                lambda data: f"{data.ct_polling_rate}s" if data.ct_polling_rate is not None else None,
-                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
                 coordinator,
