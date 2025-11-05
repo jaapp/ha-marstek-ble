@@ -29,9 +29,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Setting up Marstek BLE entry: %s", entry.data)
 
     address: str = entry.data[CONF_ADDRESS]
+    device_name: str = entry.data.get(CONF_NAME, entry.title)
     poll_interval: int = entry.options.get(
         CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
     )
+
+    # Check for duplicate device names in other entries
+    for other_entry in hass.config_entries.async_entries(DOMAIN):
+        if other_entry.entry_id != entry.entry_id:
+            other_name = other_entry.data.get(CONF_NAME, other_entry.title)
+            other_address = other_entry.data.get(CONF_ADDRESS)
+            if other_name == device_name and other_address != address:
+                _LOGGER.warning(
+                    "Found duplicate device name '%s': this entry uses address %s, "
+                    "but another entry uses address %s. This may cause data to be "
+                    "reported incorrectly. Please remove duplicate config entries.",
+                    device_name,
+                    address,
+                    other_address,
+                )
 
     # Get BLE device
     ble_device = bluetooth.async_ble_device_from_address(
@@ -48,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         logger=_LOGGER,
         address=address,
         device=ble_device,
-        device_name=entry.data.get(CONF_NAME, entry.title),
+        device_name=device_name,
         poll_interval=poll_interval,
     )
 
@@ -67,7 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config_entry_id=entry.entry_id,
         connections={(dr.CONNECTION_BLUETOOTH, address)},
         identifiers={(DOMAIN, address)},
-        name=entry.data.get(CONF_NAME, entry.title),
+        name=device_name,
         manufacturer="Marstek",
         model="Venus E",
     )

@@ -176,7 +176,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     ) -> MarstekData:
         """Poll the device for data."""
         _LOGGER.debug(
-            "_async_update called - Updating Marstek data from %s",
+            "[%s/%s] _async_update called - Updating Marstek data from %s",
+            self.device_name,
+            self.address,
             service_info.device.address,
         )
 
@@ -207,7 +209,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
         _LOGGER.debug(
-            "Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
+            "[%s/%s] Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
+            self.device_name,
+            self.address,
             self.data.battery_voltage,
             self.data.battery_soc,
         )
@@ -219,7 +223,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         await self._send_and_sleep(CMD_BMS_DATA)
 
         _LOGGER.debug(
-            "Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
+            "[%s/%s] Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
+            self.device_name,
+            self.address,
             self.data.battery_voltage,
             self.data.battery_soc,
         )
@@ -258,9 +264,17 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""
         raw_data = bytes(data)
-        _LOGGER.debug("Received notification from sender %s: %s", sender, raw_data.hex())
         _LOGGER.debug(
-            "Data before parsing: battery_voltage=%s, battery_soc=%s",
+            "[%s/%s] Received notification from sender %s: %s",
+            self.device_name,
+            self.address,
+            sender,
+            raw_data.hex()
+        )
+        _LOGGER.debug(
+            "[%s/%s] Data before parsing: battery_voltage=%s, battery_soc=%s",
+            self.device_name,
+            self.address,
             self.data.battery_voltage,
             self.data.battery_soc,
         )
@@ -268,8 +282,14 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         result = self._protocol.parse_notification(raw_data, self.data)
         self.device.record_notification(sender, raw_data, result)
 
-        _LOGGER.debug("Parse result: %s, data after parsing: battery_voltage=%s, battery_soc=%s",
-                     result, self.data.battery_voltage, self.data.battery_soc)
+        _LOGGER.debug(
+            "[%s/%s] Parse result: %s, data after parsing: battery_voltage=%s, battery_soc=%s",
+            self.device_name,
+            self.address,
+            result,
+            self.data.battery_voltage,
+            self.data.battery_soc
+        )
 
         if result:
             # Entities listen for coordinator updates; notify only when parsing succeeded.
