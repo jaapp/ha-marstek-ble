@@ -1,0 +1,8 @@
+# Requirements for standalone Marstek BLE test script
+# Install with: pip install -r test_requirements.txt
+
+# Core BLE library (cross-platform, works on macOS)
+bleak>=0.21.0
+
+# Retry connector for robust BLE connections
+bleak-retry-connector>=3.4.0
