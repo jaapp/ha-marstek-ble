@@ -25,7 +25,7 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 
 try:
-    from aioesphomeapi import APIClient, BluetoothLEAdvertisement, BluetoothProxyFeature
+    from aioesphomeapi import APIClient, BluetoothLEAdvertisement, BluetoothProxyFeature, BluetoothScannerMode
     PROXY_AVAILABLE = True
 except ImportError:
     PROXY_AVAILABLE = False
@@ -781,6 +781,10 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
             _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {adv.name} ({mac_formatted})")
 
     try:
+        # Set scanner to ACTIVE mode to receive advertisements
+        _LOGGER.debug("[Proxy] Setting scanner to ACTIVE mode...")
+        proxy_client.bluetooth_scanner_set_mode(BluetoothScannerMode.ACTIVE)
+
         # Subscribe to advertisements
         _LOGGER.debug("[Proxy] Subscribing to BLE advertisements...")
         unsub = proxy_client.subscribe_bluetooth_le_advertisements(on_advertisement)
@@ -789,9 +793,12 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
         # Scan for devices
         await asyncio.sleep(scan_timeout)
 
-        # Unsubscribe
+        # Unsubscribe and restore scanner to PASSIVE mode
         _LOGGER.debug(f"[Proxy] Scan complete. Received {total_advertisements} total advertisements, found {len(found_devices)} matching devices. Unsubscribing...")
         unsub()
+
+        _LOGGER.debug("[Proxy] Restoring scanner to PASSIVE mode...")
+        proxy_client.bluetooth_scanner_set_mode(BluetoothScannerMode.PASSIVE)
 
         print(f" Found {len(found_devices)} device(s) ✓\n")
 
@@ -817,6 +824,11 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
     except Exception as e:
         print(f" ✗ ({e})")
         _LOGGER.error(f"Error during proxy device discovery: {e}")
+        # Restore scanner to PASSIVE mode even on error
+        try:
+            proxy_client.bluetooth_scanner_set_mode(BluetoothScannerMode.PASSIVE)
+        except:
+            pass
         return []
 
 
