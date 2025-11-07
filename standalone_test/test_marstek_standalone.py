@@ -416,8 +416,8 @@ class ProxyMarstekTester:
                     self._handle_notification(handle, data)
 
             # Subscribe to BLE callbacks
-            await self.proxy_client.subscribe_bluetooth_connections_free(lambda free: None)
-            await self.proxy_client.subscribe_bluetooth_le_raw_advertisements(lambda adv: None)
+            self.proxy_client.subscribe_bluetooth_connections_free(lambda free: None)
+            self.proxy_client.subscribe_bluetooth_le_raw_advertisements(lambda adv: None)
 
             # Attempt connection via proxy
             try:
@@ -743,7 +743,7 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
 
     try:
         # Subscribe to advertisements
-        unsub = await proxy_client.subscribe_bluetooth_le_advertisements(on_advertisement)
+        unsub = proxy_client.subscribe_bluetooth_le_advertisements(on_advertisement)
 
         # Scan for devices
         await asyncio.sleep(scan_timeout)
