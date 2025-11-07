@@ -62,6 +62,10 @@ class MarstekTester:
         self.data = MarstekData()
         self.connected = False
 
+        # Track command timing and responses
+        self.command_timings = {}  # cmd -> response_time_ms
+        self.command_responses = {}  # cmd -> bool (got response within timeout)
+
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle BLE notifications from the device."""
         raw_data = bytes(data)
@@ -121,71 +125,78 @@ class MarstekTester:
         try:
             device_short_name = self.ble_device.name[:20] if self.ble_device.name else "Unknown"
 
+            # Helper to send command and track timing
+            async def send_and_track(cmd: int, name: str, payload: bytes = b"", delay: float = 0.3):
+                import time
+                print(f"  • {device_short_name}: {name}...", end='', flush=True)
+
+                # Get diagnostics before
+                diag_before = self.marstek_device.get_diagnostics()
+                cmd_stats_before = diag_before.get("command_stats", {}).get(f"0x{cmd:02X}", {})
+                notifications_before = cmd_stats_before.get("last_notification")
+
+                start_time = time.time()
+                success = await self.marstek_device.send_command(cmd, payload)
+                await asyncio.sleep(delay)
+
+                # Get diagnostics after
+                diag_after = self.marstek_device.get_diagnostics()
+                cmd_stats_after = diag_after.get("command_stats", {}).get(f"0x{cmd:02X}", {})
+                notifications_after = cmd_stats_after.get("last_notification")
+
+                # Check if we got a response
+                got_response = notifications_after and notifications_after != notifications_before
+                self.command_responses[cmd] = got_response
+
+                # Calculate response time if we got one
+                if got_response and notifications_after:
+                    # Parse ISO timestamp
+                    from datetime import datetime
+                    notif_time = datetime.fromisoformat(notifications_after.replace('Z', '+00:00'))
+                    response_time_ms = (notif_time.timestamp() - start_time) * 1000
+                    self.command_timings[cmd] = response_time_ms
+                else:
+                    self.command_timings[cmd] = None
+
+                if got_response:
+                    print(" ✓")
+                else:
+                    print(" ⚠")  # Warning - no response
+
+                return success
+
             # Read basic device info
-            print(f"  • {device_short_name}: Device info...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_DEVICE_INFO)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_DEVICE_INFO, "Device info", delay=slow_delay)
 
             # Read runtime info (FAST - critical data)
-            print(f"  • {device_short_name}: Runtime info...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_RUNTIME_INFO)
-            await asyncio.sleep(fast_delay)  # 0.1s - matches HA coordinator
-            print(" ✓")
+            await send_and_track(CMD_RUNTIME_INFO, "Runtime info", delay=fast_delay)
 
             # Read BMS data (FAST - critical battery info)
-            print(f"  • {device_short_name}: BMS data...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_BMS_DATA)
-            await asyncio.sleep(fast_delay)  # 0.1s - matches HA coordinator
-            print(" ✓")
+            await send_and_track(CMD_BMS_DATA, "BMS data", delay=fast_delay)
 
             # Read system data
-            print(f"  • {device_short_name}: System data...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_SYSTEM_DATA)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_SYSTEM_DATA, "System data", delay=slow_delay)
 
             # Read WiFi SSID
-            print(f"  • {device_short_name}: WiFi SSID...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_WIFI_SSID)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_WIFI_SSID, "WiFi SSID", delay=slow_delay)
 
             # Read config data
-            print(f"  • {device_short_name}: Config data...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_CONFIG_DATA)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_CONFIG_DATA, "Config data", delay=slow_delay)
 
             # Read timer info
-            print(f"  • {device_short_name}: Timer info...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_TIMER_INFO)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_TIMER_INFO, "Timer info", delay=slow_delay)
 
             # Read CT polling rate
-            print(f"  • {device_short_name}: CT polling...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_CT_POLLING_RATE)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_CT_POLLING_RATE, "CT polling", delay=slow_delay)
 
             # Read meter IP
-            print(f"  • {device_short_name}: Meter IP...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_METER_IP, b"\x0B")
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_METER_IP, "Meter IP", payload=b"\x0B", delay=slow_delay)
 
             # Read network info
-            print(f"  • {device_short_name}: Network info...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_NETWORK_INFO)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_NETWORK_INFO, "Network info", delay=slow_delay)
 
             # Read local API status
-            print(f"  • {device_short_name}: Local API...", end='', flush=True)
-            await self.marstek_device.send_command(CMD_LOCAL_API_STATUS)
-            await asyncio.sleep(slow_delay)  # 0.3s
-            print(" ✓")
+            await send_and_track(CMD_LOCAL_API_STATUS, "Local API", delay=slow_delay)
 
             return True
 
@@ -398,6 +409,52 @@ def print_table(testers: list[MarstekTester]) -> None:
 
     print_row("Commands Sent", cmd_sent)
     print_row("Success Rate", success_rate)
+    print_separator()
+
+    # Command Response Details
+    print("\n--- Command Response Details ---")
+    print_separator()
+
+    # Map command codes to names for readability
+    command_names = {
+        0x03: "Runtime Info",
+        0x04: "Device Info",
+        0x08: "WiFi SSID",
+        0x0D: "System Data",
+        0x13: "Timer Info",
+        0x14: "BMS Data",
+        0x1A: "Config Data",
+        0x21: "Meter IP",
+        0x22: "CT Polling",
+        0x24: "Network Info",
+        0x28: "Local API",
+    }
+
+    # Show response status and timing for each command
+    for cmd, name in command_names.items():
+        # Response status (✓ = got response, ✗ = no response)
+        response_status = []
+        for t in testers:
+            if cmd in t.command_responses:
+                response_status.append("✓" if t.command_responses[cmd] else "✗")
+            else:
+                response_status.append("-")
+
+        # Response times
+        response_times = []
+        for t in testers:
+            if cmd in t.command_timings and t.command_timings[cmd] is not None:
+                ms = t.command_timings[cmd]
+                if ms < 1000:
+                    response_times.append(f"{ms:.0f}ms")
+                else:
+                    response_times.append(f"{ms/1000:.1f}s")
+            else:
+                response_times.append("NO RESP")
+
+        print_row(f"{name} (0x{cmd:02X})", response_status)
+        print_row(f"  └─ Response Time", response_times)
+
     print_separator()
 
     print("\n" + "=" * 120)
