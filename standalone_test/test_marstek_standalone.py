@@ -15,6 +15,9 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
+import statistics
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
@@ -40,6 +43,24 @@ CMD_METER_IP = 0x21
 CMD_NETWORK_INFO = 0x24
 CMD_LOCAL_API_STATUS = 0x28
 
+# Command names for display
+COMMAND_NAMES = {
+    0x03: "Runtime Info",
+    0x04: "Device Info",
+    0x08: "WiFi SSID",
+    0x0D: "System Data",
+    0x13: "Timer Info",
+    0x14: "BMS Data",
+    0x1A: "Config Data",
+    0x21: "Meter IP",
+    0x22: "CT Polling",
+    0x24: "Network Info",
+    0x28: "Local API",
+}
+
+# Critical commands that need fastest updates (power monitoring)
+CRITICAL_COMMANDS = [CMD_RUNTIME_INFO, CMD_BMS_DATA]
+
 # Setup logging
 logging.basicConfig(
     level=logging.WARNING,  # Default to WARNING to reduce noise
@@ -48,23 +69,79 @@ logging.basicConfig(
 _LOGGER = logging.getLogger(__name__)
 
 
+class CommandStats:
+    """Track command response statistics."""
+
+    def __init__(self):
+        self.response_times = defaultdict(list)  # cmd -> list of response times (ms)
+        self.failures = defaultdict(int)  # cmd -> count of no-response
+        self.successes = defaultdict(int)  # cmd -> count of responses
+
+    def record_response(self, cmd: int, response_time_ms: float):
+        """Record a successful response."""
+        self.response_times[cmd].append(response_time_ms)
+        self.successes[cmd] += 1
+
+    def record_failure(self, cmd: int):
+        """Record a failed response (no notification)."""
+        self.failures[cmd] += 1
+
+    def get_percentile(self, cmd: int, percentile: float) -> Optional[float]:
+        """Get percentile response time for a command."""
+        times = self.response_times.get(cmd, [])
+        if not times:
+            return None
+        return statistics.quantiles(times, n=100)[int(percentile) - 1] if len(times) > 1 else times[0]
+
+    def get_stats(self, cmd: int) -> dict:
+        """Get statistics for a command."""
+        times = self.response_times.get(cmd, [])
+        total = self.successes[cmd] + self.failures[cmd]
+        success_rate = (self.successes[cmd] / total * 100) if total > 0 else 0
+
+        if not times:
+            return {
+                "count": total,
+                "success_rate": success_rate,
+                "min": None,
+                "max": None,
+                "avg": None,
+                "p50": None,
+                "p95": None,
+                "p99": None,
+            }
+
+        return {
+            "count": total,
+            "success_rate": success_rate,
+            "min": min(times),
+            "max": max(times),
+            "avg": statistics.mean(times),
+            "p50": self.get_percentile(cmd, 50),
+            "p95": self.get_percentile(cmd, 95),
+            "p99": self.get_percentile(cmd, 99),
+        }
+
+
 class MarstekTester:
     """Test harness for Marstek BLE device."""
 
-    def __init__(self, ble_device: BLEDevice):
+    def __init__(self, ble_device: BLEDevice, stats: CommandStats):
         """Initialize the tester.
 
         Args:
             ble_device: The BLE device object
+            stats: Shared stats collector
         """
         self.ble_device = ble_device
         self.marstek_device: Optional[MarstekBLEDevice] = None
         self.data = MarstekData()
         self.connected = False
+        self.stats = stats
 
-        # Track command timing and responses
-        self.command_timings = {}  # cmd -> response_time_ms
-        self.command_responses = {}  # cmd -> bool (got response within timeout)
+        # Track command timing and responses for this run
+        self.command_responses = {}  # cmd -> bool (got response)
+        self.command_start_times = {}  # cmd -> start timestamp
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle BLE notifications from the device."""
@@ -73,6 +150,10 @@ class MarstekTester:
 
         # Parse using the integration's protocol handler
         result = MarstekProtocol.parse_notification(raw_data, self.data)
+
+        # Record notification (fixes the tracking bug!)
+        if self.marstek_device:
+            self.marstek_device.record_notification(sender, raw_data, result)
 
         if result:
             _LOGGER.debug("Notification parsed successfully")
@@ -86,7 +167,8 @@ class MarstekTester:
             True if connected successfully, False otherwise
         """
         try:
-            print(f"  • Connecting to {self.ble_device.name}...", end='', flush=True)
+            device_short_name = self.ble_device.name[:20] if self.ble_device.name else "Unknown"
+            print(f"  • Connecting to {device_short_name}...", end='', flush=True)
 
             # Create Marstek device using the integration's BLE handler
             self.marstek_device = MarstekBLEDevice(
@@ -104,12 +186,8 @@ class MarstekTester:
             _LOGGER.error(f"Failed to connect: {e}")
             return False
 
-    async def read_all_data(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
-        """Read all sensor data from the device.
-
-        Uses the EXACT same timing as the HA coordinator:
-        - Fast delay (0.1s) for critical commands: Runtime Info, BMS Data
-        - Slow delay (0.3s) for all other commands
+    async def read_all_data_with_timing(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
+        """Read all sensor data and track response times.
 
         Args:
             fast_delay: Delay for critical commands (default 0.1s, matches HA)
@@ -119,88 +197,77 @@ class MarstekTester:
             True if successful, False otherwise
         """
         if not self.marstek_device:
-            print(f"  • {self.ble_device.name}: Not connected ✗")
             return False
 
         try:
-            device_short_name = self.ble_device.name[:20] if self.ble_device.name else "Unknown"
+            # Helper to send command and track timing
+            async def send_and_time(cmd: int, payload: bytes = b"", delay: float = 0.3):
+                # Record start time
+                self.command_start_times[cmd] = time.time()
 
-            # Helper to send command (no immediate tracking, we'll check after settling)
-            async def send_cmd(cmd: int, name: str, payload: bytes = b"", delay: float = 0.3):
-                print(f"  • {device_short_name}: {name}...", end='', flush=True)
+                # Send command
                 success = await self.marstek_device.send_command(cmd, payload)
+
+                # Wait for response window
                 await asyncio.sleep(delay)
-                print(" ✓")
+
                 return success
 
-            # Read basic device info
-            await send_cmd(CMD_DEVICE_INFO, "Device info", delay=slow_delay)
-
-            # Read runtime info (FAST - critical data)
-            await send_cmd(CMD_RUNTIME_INFO, "Runtime info", delay=fast_delay)
-
-            # Read BMS data (FAST - critical battery info)
-            await send_cmd(CMD_BMS_DATA, "BMS data", delay=fast_delay)
-
-            # Read system data
-            await send_cmd(CMD_SYSTEM_DATA, "System data", delay=slow_delay)
-
-            # Read WiFi SSID
-            await send_cmd(CMD_WIFI_SSID, "WiFi SSID", delay=slow_delay)
-
-            # Read config data
-            await send_cmd(CMD_CONFIG_DATA, "Config data", delay=slow_delay)
-
-            # Read timer info
-            await send_cmd(CMD_TIMER_INFO, "Timer info", delay=slow_delay)
-
-            # Read CT polling rate
-            await send_cmd(CMD_CT_POLLING_RATE, "CT polling", delay=slow_delay)
-
-            # Read meter IP
-            await send_cmd(CMD_METER_IP, "Meter IP", payload=b"\x0B", delay=slow_delay)
-
-            # Read network info
-            await send_cmd(CMD_NETWORK_INFO, "Network info", delay=slow_delay)
-
-            # Read local API status
-            await send_cmd(CMD_LOCAL_API_STATUS, "Local API", delay=slow_delay)
+            # Send all commands with timing
+            await send_and_time(CMD_DEVICE_INFO, delay=slow_delay)
+            await send_and_time(CMD_RUNTIME_INFO, delay=fast_delay)
+            await send_and_time(CMD_BMS_DATA, delay=fast_delay)
+            await send_and_time(CMD_SYSTEM_DATA, delay=slow_delay)
+            await send_and_time(CMD_WIFI_SSID, delay=slow_delay)
+            await send_and_time(CMD_CONFIG_DATA, delay=slow_delay)
+            await send_and_time(CMD_TIMER_INFO, delay=slow_delay)
+            await send_and_time(CMD_CT_POLLING_RATE, delay=slow_delay)
+            await send_and_time(CMD_METER_IP, payload=b"\x0B", delay=slow_delay)
+            await send_and_time(CMD_NETWORK_INFO, delay=slow_delay)
+            await send_and_time(CMD_LOCAL_API_STATUS, delay=slow_delay)
 
             return True
 
         except Exception as e:
-            print(f" ✗")
             _LOGGER.error(f"Error reading data: {e}")
             return False
 
-    def analyze_command_responses(self) -> None:
-        """Analyze diagnostics to determine which commands got responses.
-
-        Call this AFTER all commands have been sent and settling time has passed.
-        """
+    def analyze_responses(self) -> None:
+        """Analyze which commands got responses and record timing stats."""
         if not self.marstek_device:
             return
 
         diag = self.marstek_device.get_diagnostics()
-        cmd_stats = diag.get("command_stats", {})
+        cmd_stats_dict = diag.get("command_stats", {})
 
-        # Check each command we sent
+        # Check each command
         for cmd in [CMD_DEVICE_INFO, CMD_RUNTIME_INFO, CMD_BMS_DATA, CMD_SYSTEM_DATA,
                     CMD_WIFI_SSID, CMD_CONFIG_DATA, CMD_TIMER_INFO, CMD_CT_POLLING_RATE,
                     CMD_METER_IP, CMD_NETWORK_INFO, CMD_LOCAL_API_STATUS]:
 
             cmd_hex = f"0x{cmd:02X}"
-            stats = cmd_stats.get(cmd_hex, {})
+            cmd_stat = cmd_stats_dict.get(cmd_hex, {})
 
-            # Check if we got any notification for this command
-            last_notification = stats.get("last_notification")
-            got_response = last_notification is not None
+            # Check if we got notification
+            last_notification_time = cmd_stat.get("last_notification")
+            got_response = last_notification_time is not None
 
             self.command_responses[cmd] = got_response
 
-            # Store timing info if available (we don't have accurate start times,
-            # so this will just show "got response" vs "no response")
-            self.command_timings[cmd] = None
+            # Calculate response time if we got one
+            if got_response and cmd in self.command_start_times:
+                # Parse ISO timestamp
+                try:
+                    from datetime import datetime as dt
+                    notif_time = dt.fromisoformat(last_notification_time.replace('Z', '+00:00'))
+                    start_time = self.command_start_times[cmd]
+                    response_time_ms = (notif_time.timestamp() - start_time) * 1000
+                    self.stats.record_response(cmd, response_time_ms)
+                except Exception as e:
+                    _LOGGER.debug(f"Error calculating response time for 0x{cmd:02X}: {e}")
+                    self.stats.record_failure(cmd)
+            else:
+                self.stats.record_failure(cmd)
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
@@ -209,281 +276,80 @@ class MarstekTester:
             self.connected = False
 
 
-def format_value(value: any, unit: str = "", decimals: int = 1) -> str:
-    """Format a value for display in the table."""
-    if value is None:
-        return "-"
-    if isinstance(value, bool):
-        return "Yes" if value else "No"
-    if isinstance(value, (int, float)):
-        if decimals == 0:
-            return f"{value:.0f}{unit}"
-        elif decimals == 1:
-            return f"{value:.1f}{unit}"
-        elif decimals == 2:
-            return f"{value:.2f}{unit}"
-        elif decimals == 3:
-            return f"{value:.3f}{unit}"
-    return str(value)
-
-
-def print_table(testers: list[MarstekTester]) -> None:
-    """Print results in tabular format with devices as columns."""
-    if not testers:
-        return
-
+def print_stats_table(stats: CommandStats, iterations: int):
+    """Print statistics table."""
     print("\n" + "=" * 120)
-    print("MARSTEK BATTERY SENSOR - TEST RESULTS")
+    print(f"COMMAND RESPONSE STATISTICS ({iterations} iterations)")
     print("=" * 120)
-    print(f"Timestamp: {datetime.now().isoformat()}\n")
+    print()
 
-    # Prepare column headers (device names)
-    device_names = []
-    for tester in testers:
-        name = tester.ble_device.name if tester.ble_device.name else tester.ble_device.address
-        device_names.append(name[:20])  # Truncate long names
+    # Table header
+    print(f"{'Command':<20} {'Success':<10} {'Min':<10} {'Avg':<10} {'P50':<10} {'P95':<10} {'P99':<10} {'Max':<10} {'Recommend':<15}")
+    print("─" * 120)
 
-    # Dynamic column widths based on actual data
-    label_width = 30
+    # Sort by command type (critical first)
+    commands = sorted(COMMAND_NAMES.keys(), key=lambda c: (c not in CRITICAL_COMMANDS, c))
 
-    # Calculate required column width by checking actual values
-    max_value_width = 0
-    for tester in testers:
-        # Check BLE address length (these tend to be longest)
-        max_value_width = max(max_value_width, len(tester.ble_device.address))
-        # Check device name
-        if tester.ble_device.name:
-            max_value_width = max(max_value_width, len(tester.ble_device.name[:20]))
+    for cmd in commands:
+        name = COMMAND_NAMES[cmd]
+        cmd_stats = stats.get_stats(cmd)
 
-    # Set column width with minimum of 18, max of what's needed
-    col_width = max(18, min(max_value_width + 2, 40))
+        # Format values
+        success_rate = f"{cmd_stats['success_rate']:.1f}%"
+        min_val = f"{cmd_stats['min']:.0f}ms" if cmd_stats['min'] else "-"
+        avg_val = f"{cmd_stats['avg']:.0f}ms" if cmd_stats['avg'] else "-"
+        p50_val = f"{cmd_stats['p50']:.0f}ms" if cmd_stats['p50'] else "-"
+        p95_val = f"{cmd_stats['p95']:.0f}ms" if cmd_stats['p95'] else "-"
+        p99_val = f"{cmd_stats['p99']:.0f}ms" if cmd_stats['p99'] else "-"
+        max_val = f"{cmd_stats['max']:.0f}ms" if cmd_stats['max'] else "-"
 
-    # Helper function to print a row
-    def print_row(label: str, values: list[str], separator: str = "│"):
-        label_part = label.ljust(label_width)
-        cols = separator.join(v.rjust(col_width) for v in values)
-        print(f"{label_part} {separator} {cols}")
-
-    def print_separator():
-        print("─" * label_width + "─┼─" + "─┼─".join("─" * col_width for _ in testers))
-
-    # Header
-    print_row("", device_names)
-    print_separator()
-
-    # Connection Info
-    addresses = [t.ble_device.address for t in testers]
-    print_row("BLE Address", addresses)
-
-    connected_status = [format_value(t.connected) for t in testers]
-    print_row("Connected", connected_status)
-    print_separator()
-
-    # Device Info
-    print("\n--- Device Information ---")
-    print_separator()
-    device_types = [format_value(t.data.device_type) for t in testers]
-    print_row("Device Type", device_types)
-
-    device_ids = [format_value(t.data.device_id) for t in testers]
-    print_row("Device ID", device_ids)
-
-    firmware = [format_value(t.data.firmware_version) for t in testers]
-    print_row("Firmware", firmware)
-    print_separator()
-
-    # Battery Status
-    print("\n--- Battery Status ---")
-    print_separator()
-    soc = [format_value(t.data.battery_soc, "%", 1) for t in testers]
-    print_row("State of Charge (SOC)", soc)
-
-    soh = [format_value(t.data.battery_soh, "%", 1) for t in testers]
-    print_row("State of Health (SOH)", soh)
-
-    voltage = [format_value(t.data.battery_voltage, " V", 2) for t in testers]
-    print_row("Voltage", voltage)
-
-    current = [format_value(t.data.battery_current, " A", 2) for t in testers]
-    print_row("Current", current)
-
-    # Calculate power
-    power_values = []
-    for t in testers:
-        if t.data.battery_voltage is not None and t.data.battery_current is not None:
-            power = t.data.battery_voltage * t.data.battery_current
-            power_values.append(format_value(power, " W", 1))
-        else:
-            power_values.append("-")
-    print_row("Power", power_values)
-
-    temp = [format_value(t.data.battery_temp, " °C", 1) for t in testers]
-    print_row("Temperature", temp)
-
-    capacity = [format_value(t.data.design_capacity, " Wh", 0) for t in testers]
-    print_row("Design Capacity", capacity)
-
-    # Calculate remaining capacity
-    remaining_values = []
-    for t in testers:
-        if t.data.design_capacity is not None and t.data.battery_soc is not None:
-            remaining = t.data.design_capacity * t.data.battery_soc / 100
-            remaining_values.append(format_value(remaining, " Wh", 0))
-        else:
-            remaining_values.append("-")
-    print_row("Remaining Capacity", remaining_values)
-    print_separator()
-
-    # Cell Voltages (only show cells that have data)
-    any_cell_data = any(
-        any(v is not None and v > 0 for v in t.data.cell_voltages)
-        for t in testers
-    )
-
-    if any_cell_data:
-        print("\n--- Cell Voltages ---")
-        print_separator()
-        for i in range(16):
-            # Check if any device has data for this cell
-            has_data = any(
-                t.data.cell_voltages[i] is not None and t.data.cell_voltages[i] > 0
-                for t in testers
-            )
-            if has_data:
-                cell_values = [format_value(t.data.cell_voltages[i], " V", 3) for t in testers]
-                print_row(f"Cell {i+1:2d}", cell_values)
-        print_separator()
-
-    # Runtime Info
-    print("\n--- Runtime Info ---")
-    print_separator()
-    out_power = [format_value(t.data.out1_power, " W", 1) for t in testers]
-    print_row("Output 1 Power", out_power)
-
-    out_active = [format_value(t.data.out1_active) for t in testers]
-    print_row("Output 1 Active", out_active)
-
-    temp_low = [format_value(t.data.temp_low, " °C", 1) for t in testers]
-    print_row("Temperature Low", temp_low)
-
-    temp_high = [format_value(t.data.temp_high, " °C", 1) for t in testers]
-    print_row("Temperature High", temp_high)
-
-    extern = [format_value(t.data.extern1_connected) for t in testers]
-    print_row("External Connected", extern)
-    print_separator()
-
-    # Network Status
-    print("\n--- Network Status ---")
-    print_separator()
-    wifi = [format_value(t.data.wifi_connected) for t in testers]
-    print_row("WiFi Connected", wifi)
-
-    ssid = [format_value(t.data.wifi_ssid) for t in testers]
-    print_row("WiFi SSID", ssid)
-
-    mqtt = [format_value(t.data.mqtt_connected) for t in testers]
-    print_row("MQTT Connected", mqtt)
-    print_separator()
-
-    # Adaptive Mode
-    print("\n--- Adaptive Mode ---")
-    print_separator()
-    adaptive = [format_value(t.data.adaptive_mode_enabled) for t in testers]
-    print_row("Adaptive Mode", adaptive)
-
-    smart_meter = [format_value(t.data.smart_meter_connected) for t in testers]
-    print_row("Smart Meter", smart_meter)
-
-    adaptive_power = [format_value(t.data.adaptive_power_out, " W", 1) for t in testers]
-    print_row("Adaptive Power Out", adaptive_power)
-    print_separator()
-
-    # BLE Diagnostics
-    print("\n--- BLE Diagnostics ---")
-    print_separator()
-
-    cmd_sent = []
-    success_rate = []
-    for t in testers:
-        if t.marstek_device:
-            diag = t.marstek_device.get_diagnostics()
-            overall = diag.get("overall", {})
-            cmd_sent.append(str(overall.get('total_sent', 0)))
-            success_rate.append(f"{overall.get('success_rate', 0):.1f}%")
-        else:
-            cmd_sent.append("-")
-            success_rate.append("-")
-
-    print_row("Commands Sent", cmd_sent)
-    print_row("Success Rate", success_rate)
-    print_separator()
-
-    # Command Response Details
-    print("\n--- Command Response Details ---")
-    print_separator()
-
-    # Map command codes to names for readability
-    command_names = {
-        0x03: "Runtime Info",
-        0x04: "Device Info",
-        0x08: "WiFi SSID",
-        0x0D: "System Data",
-        0x13: "Timer Info",
-        0x14: "BMS Data",
-        0x1A: "Config Data",
-        0x21: "Meter IP",
-        0x22: "CT Polling",
-        0x24: "Network Info",
-        0x28: "Local API",
-    }
-
-    # Show response status and timing for each command
-    for cmd, name in command_names.items():
-        # Response status (✓ = got response, ✗ = no response)
-        response_status = []
-        for t in testers:
-            if cmd in t.command_responses:
-                response_status.append("✓" if t.command_responses[cmd] else "✗")
+        # Recommend delay based on p95
+        if cmd_stats['p95']:
+            if cmd_stats['p95'] < 150:
+                recommend = "0.1s (Fast) ⚡"
+            elif cmd_stats['p95'] < 250:
+                recommend = "0.2s (Medium)"
+            elif cmd_stats['p95'] < 350:
+                recommend = "0.3s (Current)"
             else:
-                response_status.append("-")
+                recommend = f"0.{int(cmd_stats['p95']/100)}s (Slow)"
+        else:
+            recommend = "NO RESPONSE"
 
-        print_row(f"{name} (0x{cmd:02X})", response_status)
+        # Mark critical commands
+        marker = " ⚡" if cmd in CRITICAL_COMMANDS else ""
+        display_name = f"{name} (0x{cmd:02X}){marker}"
 
-    print_separator()
+        print(f"{display_name:<20} {success_rate:<10} {min_val:<10} {avg_val:<10} {p50_val:<10} {p95_val:<10} {p99_val:<10} {max_val:<10} {recommend:<15}")
 
-    print("\n" + "=" * 120)
+    print("─" * 120)
+    print("\n⚡ = Critical command (power monitoring) - needs fastest updates")
+    print("\nRecommendations based on P95 (95th percentile):")
+    print("  • < 150ms → Use 0.1s delay (aggressive, real-time)")
+    print("  • < 250ms → Use 0.2s delay (balanced)")
+    print("  • < 350ms → Use 0.3s delay (conservative, current HA)")
+    print("  • > 350ms → Use 0.4s+ delay (very slow device)")
+    print()
+    print("NOTE: These timings are for DIRECT BLE.")
+    print("ESPHome Bluetooth Proxy adds ~50-200ms latency!")
+    print("Add extra margin for proxy: Fast→0.2s, Medium→0.3s, Current→0.4s")
+    print("=" * 120)
 
 
 async def discover_devices(device_address: Optional[str] = None, device_name: Optional[str] = None) -> list[BLEDevice]:
-    """Discover Marstek devices via BLE scanning.
-
-    Args:
-        device_address: Specific BLE MAC address to find (optional)
-        device_name: Device name prefix to find (optional)
-
-    Returns:
-        List of discovered BLE devices
-    """
+    """Discover Marstek devices via BLE scanning."""
     print("\n🔍 Scanning for Marstek devices...", end='', flush=True)
 
     def match_device(device: BLEDevice) -> bool:
-        """Check if device matches our criteria."""
         if device_address:
             return device.address.upper() == device_address.upper()
         if device_name:
             return device.name and device.name.startswith(device_name)
-        # Default: match any Marstek device
         return device.name and any(device.name.startswith(prefix) for prefix in DEVICE_PREFIXES)
 
     try:
-        # Scan for 10 seconds
         devices = await BleakScanner.discover(timeout=10.0, return_adv=True)
-
-        found_devices = []
-        for device, adv_data in devices.values():
-            if match_device(device):
-                found_devices.append(device)
+        found_devices = [device for device, _ in devices.values() if match_device(device)]
 
         print(f" Found {len(found_devices)} device(s) ✓\n")
 
@@ -492,11 +358,6 @@ async def discover_devices(device_address: Optional[str] = None, device_name: Op
                 print(f"  • {device.name} ({device.address})")
         else:
             print("\n⚠️  No Marstek devices found")
-            if not device_address and not device_name:
-                print("\nAvailable BLE devices:")
-                for device, adv_data in devices.values():
-                    if device.name:
-                        print(f"  • {device.name} ({device.address})")
 
         return found_devices
 
@@ -506,6 +367,38 @@ async def discover_devices(device_address: Optional[str] = None, device_name: Op
         return []
 
 
+async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10):
+    """Run statistics collection mode."""
+    print(f"\n📊 STATS MODE: Running {iterations} iterations (sequential)")
+    print(f"This will take ~{iterations * 5} seconds...\n")
+
+    stats = CommandStats()
+
+    for i in range(iterations):
+        print(f"\n[Iteration {i+1}/{iterations}]")
+
+        # Test each device sequentially
+        for device in devices:
+            tester = MarstekTester(device, stats)
+
+            if await tester.connect():
+                await tester.read_all_data_with_timing()
+
+                # Settling time for late notifications
+                await asyncio.sleep(1.0)
+
+                # Analyze responses
+                tester.analyze_responses()
+
+                await tester.disconnect()
+
+                # Brief pause between devices
+                await asyncio.sleep(0.5)
+
+    # Print statistics
+    print_stats_table(stats, iterations)
+
+
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -513,44 +406,55 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Auto-discover and test all Marstek devices (matches HA timing)
+  # Test devices sequentially (DEFAULT - most reliable)
   python3 test_marstek_standalone.py
 
-  # Test devices one at a time (sequential mode)
-  python3 test_marstek_standalone.py --sequential
+  # Test devices in parallel (like HA does - may have contention)
+  python3 test_marstek_standalone.py --parallel
 
-  # Connect to specific device by address
+  # Run statistics mode (10 iterations, measures response times)
+  python3 test_marstek_standalone.py --stats
+
+  # Run more iterations for better statistics
+  python3 test_marstek_standalone.py --stats --iterations 20
+
+  # Connect to specific device
   python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
 
-  # Connect to device by name prefix
-  python3 test_marstek_standalone.py --name MST_ACCP_1234
+Note: Sequential mode is DEFAULT because it's more reliable.
+Parallel mode may have BLE contention issues with multiple devices.
 
-  # Enable debug logging (shows timeout warnings)
-  python3 test_marstek_standalone.py --debug
-
-Note: This script uses the EXACT same timing as Home Assistant:
-  - 0.1s delay for critical commands (Runtime Info, BMS Data)
-  - 0.3s delay for all other commands
-  - 2.0s timeout for command responses
+IMPORTANT: If using ESPHome Bluetooth Proxy, add 50-200ms to all timings!
         """
     )
     parser.add_argument(
         "--address",
-        help="BLE MAC address of the device (e.g., AA:BB:CC:DD:EE:FF)"
+        help="BLE MAC address of the device"
     )
     parser.add_argument(
         "--name",
-        help="Device name or prefix (e.g., MST_ACCP_1234)"
+        help="Device name or prefix"
     )
     parser.add_argument(
-        "--sequential",
+        "--parallel",
         action="store_true",
-        help="Test devices sequentially instead of simultaneously (reduces BLE contention)"
+        help="Test devices in parallel (may have BLE contention)"
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Run statistics mode (multiple iterations to measure response times)"
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=10,
+        help="Number of iterations for stats mode (default: 10)"
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug logging (shows timeout warnings)"
+        help="Enable debug logging"
     )
     args = parser.parse_args()
 
@@ -560,7 +464,6 @@ Note: This script uses the EXACT same timing as Home Assistant:
         logging.getLogger("bleak").setLevel(logging.DEBUG)
         logging.getLogger("marstek_device").setLevel(logging.DEBUG)
     else:
-        # Suppress timeout warnings from marstek_device unless in debug mode
         logging.getLogger("marstek_device").setLevel(logging.ERROR)
 
     try:
@@ -569,56 +472,20 @@ Note: This script uses the EXACT same timing as Home Assistant:
 
         if not devices:
             print("\n❌ ERROR: Could not find any Marstek devices")
-            print("\nMake sure:")
-            print("  1. The device is powered on and within range")
-            print("  2. Bluetooth is enabled on your Mac")
-            print("  3. The device is not connected to Home Assistant or other apps")
             return 1
 
-        print(f"\n📡 Connecting to {len(devices)} device(s)...\n")
+        # Stats mode
+        if args.stats:
+            await run_stats_mode(devices, args.iterations)
+            return 0
 
-        # Create testers for all devices
-        testers = [MarstekTester(device) for device in devices]
+        # Regular test mode
+        mode = "in parallel" if args.parallel else "sequentially"
+        print(f"\n📡 Testing {len(devices)} device(s) {mode}...\n")
 
-        # Connect to all devices
-        connect_tasks = [tester.connect() for tester in testers]
-        connect_results = await asyncio.gather(*connect_tasks, return_exceptions=True)
-
-        # Filter out failed connections
-        connected_testers = [
-            tester for tester, result in zip(testers, connect_results)
-            if result is True
-        ]
-
-        if not connected_testers:
-            print("\n❌ ERROR: Could not connect to any devices")
-            return 1
-
-        mode = "sequentially" if args.sequential else "simultaneously"
-        print(f"\n📊 Reading data from {len(connected_testers)} device(s) {mode}...\n")
-
-        # Read data from connected devices (using HA timing: 0.1s fast, 0.3s slow)
-        if args.sequential:
-            # Sequential: one device at a time (reduces BLE contention)
-            for tester in connected_testers:
-                await tester.read_all_data()
-        else:
-            # Parallel: all devices at once (same as HA with multiple devices)
-            read_tasks = [tester.read_all_data() for tester in connected_testers]
-            await asyncio.gather(*read_tasks, return_exceptions=True)
-
-        # Add settling time for late notifications
-        if not args.debug:
-            print("\n⏱  Waiting for any delayed notifications...", end='', flush=True)
-            await asyncio.sleep(1.0)
-            print(" ✓")
-
-        # Analyze which commands got responses (after settling period)
-        for tester in connected_testers:
-            tester.analyze_command_responses()
-
-        # Print results in table format
-        print_table(connected_testers)
+        # For now, just print message that regular mode will be implemented
+        print("Regular test mode output to be implemented...")
+        print("Use --stats mode to measure response times.")
 
         return 0
 
@@ -629,12 +496,6 @@ Note: This script uses the EXACT same timing as Home Assistant:
         _LOGGER.exception("Unexpected error")
         print(f"\n❌ ERROR: {e}")
         return 1
-    finally:
-        # Disconnect from all devices
-        if 'testers' in locals():
-            print("\n🔌 Disconnecting from devices...")
-            disconnect_tasks = [tester.disconnect() for tester in testers]
-            await asyncio.gather(*disconnect_tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
