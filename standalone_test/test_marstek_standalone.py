@@ -148,6 +148,7 @@ class MarstekTester:
         # Track command timing and responses for this run
         self.command_responses = {}  # cmd -> bool (got response)
         self.command_start_times = {}  # cmd -> start timestamp
+        self.command_response_times = {}  # cmd -> response time (when notification received)
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle BLE notifications from the device."""
@@ -161,6 +162,15 @@ class MarstekTester:
         if self.marstek_device:
             self.marstek_device.record_notification(sender, raw_data, result)
 
+        # Track response time for this notification
+        if result and result.get("command") is not None:
+            cmd = result["command"]
+            if cmd in self.command_start_times:
+                # Calculate response time
+                response_time_ms = (time.time() - self.command_start_times[cmd]) * 1000
+                self.command_response_times[cmd] = response_time_ms
+                _LOGGER.debug(f"Command 0x{cmd:02X} responded in {response_time_ms:.0f}ms")
+
         if result:
             _LOGGER.debug("Notification parsed successfully")
         else:
@@ -170,6 +180,7 @@ class MarstekTester:
         """Reset tracking for a new iteration (keeps connection alive)."""
         self.command_responses = {}
         self.command_start_times = {}
+        self.command_response_times = {}
 
     async def connect(self) -> bool:
         """Connect to the device.
@@ -245,40 +256,21 @@ class MarstekTester:
 
     def analyze_responses(self) -> None:
         """Analyze which commands got responses and record timing stats."""
-        if not self.marstek_device:
-            return
-
-        diag = self.marstek_device.get_diagnostics()
-        cmd_stats_dict = diag.get("command_stats", {})
-
-        # Check each command
+        # Check each command we sent
         for cmd in [CMD_DEVICE_INFO, CMD_RUNTIME_INFO, CMD_BMS_DATA, CMD_SYSTEM_DATA,
                     CMD_WIFI_SSID, CMD_CONFIG_DATA, CMD_TIMER_INFO, CMD_CT_POLLING_RATE,
                     CMD_METER_IP, CMD_NETWORK_INFO, CMD_LOCAL_API_STATUS]:
 
-            cmd_hex = f"0x{cmd:02X}"
-            cmd_stat = cmd_stats_dict.get(cmd_hex, {})
-
-            # Check if we got notification
-            last_notification_time = cmd_stat.get("last_notification")
-            got_response = last_notification_time is not None
-
-            self.command_responses[cmd] = got_response
-
-            # Calculate response time if we got one
-            if got_response and cmd in self.command_start_times:
-                # Parse ISO timestamp
-                try:
-                    from datetime import datetime as dt
-                    notif_time = dt.fromisoformat(last_notification_time.replace('Z', '+00:00'))
-                    start_time = self.command_start_times[cmd]
-                    response_time_ms = (notif_time.timestamp() - start_time) * 1000
-                    self.stats.record_response(cmd, response_time_ms)
-                except Exception as e:
-                    _LOGGER.debug(f"Error calculating response time for 0x{cmd:02X}: {e}")
-                    self.stats.record_failure(cmd)
+            # Check if we got a response (notification arrived)
+            if cmd in self.command_response_times:
+                # We got a response - record the timing
+                response_time_ms = self.command_response_times[cmd]
+                self.stats.record_response(cmd, response_time_ms)
+                self.command_responses[cmd] = True
             else:
+                # No response received
                 self.stats.record_failure(cmd)
+                self.command_responses[cmd] = False
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
@@ -314,7 +306,7 @@ class ProxyMarstekTester:
         # Track command timing and responses
         self.command_responses = {}
         self.command_start_times = {}
-        self.command_stats_dict = {}  # Manual tracking like MarstekBLEDevice
+        self.command_response_times = {}  # cmd -> response time (when notification received)
 
     def _handle_notification(self, handle: int, data: bytes) -> None:
         """Handle BLE notifications from the device via proxy."""
@@ -323,19 +315,14 @@ class ProxyMarstekTester:
         # Parse using the integration's protocol handler
         result = MarstekProtocol.parse_notification(data, self.data)
 
-        # Record notification manually
+        # Track response time for this notification
         if result and result.get("command") is not None:
             cmd = result["command"]
-            cmd_hex = f"0x{cmd:02X}"
-
-            if cmd_hex not in self.command_stats_dict:
-                self.command_stats_dict[cmd_hex] = {
-                    "count": 0,
-                    "last_notification": None,
-                }
-
-            self.command_stats_dict[cmd_hex]["count"] += 1
-            self.command_stats_dict[cmd_hex]["last_notification"] = datetime.utcnow().isoformat() + 'Z'
+            if cmd in self.command_start_times:
+                # Calculate response time
+                response_time_ms = (time.time() - self.command_start_times[cmd]) * 1000
+                self.command_response_times[cmd] = response_time_ms
+                _LOGGER.debug(f"[Proxy] Command 0x{cmd:02X} responded in {response_time_ms:.0f}ms")
 
         if result:
             _LOGGER.debug("[Proxy] Notification parsed successfully")
@@ -346,6 +333,7 @@ class ProxyMarstekTester:
         """Reset tracking for a new iteration (keeps connection alive)."""
         self.command_responses = {}
         self.command_start_times = {}
+        self.command_response_times = {}
 
     async def connect(self) -> bool:
         """Connect to the device via ESPHome proxy.
@@ -501,32 +489,21 @@ class ProxyMarstekTester:
 
     def analyze_responses(self) -> None:
         """Analyze which commands got responses and record timing stats."""
+        # Check each command we sent
         for cmd in [CMD_DEVICE_INFO, CMD_RUNTIME_INFO, CMD_BMS_DATA, CMD_SYSTEM_DATA,
                     CMD_WIFI_SSID, CMD_CONFIG_DATA, CMD_TIMER_INFO, CMD_CT_POLLING_RATE,
                     CMD_METER_IP, CMD_NETWORK_INFO, CMD_LOCAL_API_STATUS]:
 
-            cmd_hex = f"0x{cmd:02X}"
-            cmd_stat = self.command_stats_dict.get(cmd_hex, {})
-
-            # Check if we got notification
-            last_notification_time = cmd_stat.get("last_notification")
-            got_response = last_notification_time is not None
-
-            self.command_responses[cmd] = got_response
-
-            # Calculate response time if we got one
-            if got_response and cmd in self.command_start_times:
-                try:
-                    from datetime import datetime as dt
-                    notif_time = dt.fromisoformat(last_notification_time.replace('Z', '+00:00'))
-                    start_time = self.command_start_times[cmd]
-                    response_time_ms = (notif_time.timestamp() - start_time) * 1000
-                    self.stats.record_response(cmd, response_time_ms)
-                except Exception as e:
-                    _LOGGER.debug(f"[Proxy] Error calculating response time for 0x{cmd:02X}: {e}")
-                    self.stats.record_failure(cmd)
+            # Check if we got a response (notification arrived)
+            if cmd in self.command_response_times:
+                # We got a response - record the timing
+                response_time_ms = self.command_response_times[cmd]
+                self.stats.record_response(cmd, response_time_ms)
+                self.command_responses[cmd] = True
             else:
+                # No response received
                 self.stats.record_failure(cmd)
+                self.command_responses[cmd] = False
 
     async def disconnect(self) -> None:
         """Disconnect from the device via proxy."""
@@ -806,29 +783,33 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
                 print(f"  Type:       {data.device_type}")
             if data.device_id:
                 print(f"  ID:         {data.device_id}")
-            if data.device_mac:
-                print(f"  MAC:        {data.device_mac}")
+            if data.mac_address:
+                print(f"  MAC:        {data.mac_address}")
             if data.firmware_version:
                 print(f"  Firmware:   {data.firmware_version}")
 
         # Battery Status
         print("\n🔋 Battery Status:")
-        if data.soc is not None:
-            print(f"  SOC:        {data.soc:.1f}%")
-        if data.soh is not None:
-            print(f"  SOH:        {data.soh:.1f}%")
-        if data.voltage is not None:
-            print(f"  Voltage:    {data.voltage:.2f} V")
-        if data.current is not None:
-            print(f"  Current:    {data.current:.2f} A")
-        if data.power is not None:
-            print(f"  Power:      {data.power:.1f} W")
-        if data.temperature is not None:
-            print(f"  Temp:       {data.temperature:.1f} °C")
+        if data.battery_soc is not None:
+            print(f"  SOC:        {data.battery_soc:.1f}%")
+        if data.battery_soh is not None:
+            print(f"  SOH:        {data.battery_soh:.1f}%")
+        if data.battery_voltage is not None:
+            print(f"  Voltage:    {data.battery_voltage:.2f} V")
+        if data.battery_current is not None:
+            print(f"  Current:    {data.battery_current:.2f} A")
+        # Calculate power from voltage * current
+        if data.battery_voltage is not None and data.battery_current is not None:
+            power = data.battery_voltage * data.battery_current
+            print(f"  Power:      {power:.1f} W")
+        if data.battery_temp is not None:
+            print(f"  Temp:       {data.battery_temp:.1f} °C")
         if data.design_capacity is not None:
             print(f"  Capacity:   {data.design_capacity} Wh (design)")
-        if data.remaining_capacity is not None:
-            print(f"              {data.remaining_capacity} Wh (remaining)")
+            # Calculate remaining capacity from SOC
+            if data.battery_soc is not None:
+                remaining = (data.battery_soc / 100.0) * data.design_capacity
+                print(f"              {remaining:.0f} Wh (remaining)")
 
         # Cell Voltages
         if data.cell_voltages and any(v is not None for v in data.cell_voltages):
@@ -838,14 +819,14 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
                     print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
 
         # Runtime Info
-        if data.output_power is not None or data.max_temp is not None:
+        if data.out1_power is not None or data.temp_high is not None:
             print("\n⏱️  Runtime Info:")
-            if data.output_power is not None:
-                print(f"  Output:     {data.output_power:.1f} W")
-            if data.max_temp is not None:
-                print(f"  Max Temp:   {data.max_temp:.1f} °C")
-            if data.min_temp is not None:
-                print(f"  Min Temp:   {data.min_temp:.1f} °C")
+            if data.out1_power is not None:
+                print(f"  Output:     {data.out1_power:.1f} W")
+            if data.temp_high is not None:
+                print(f"  Max Temp:   {data.temp_high:.1f} °C")
+            if data.temp_low is not None:
+                print(f"  Min Temp:   {data.temp_low:.1f} °C")
 
         # Network Status
         if data.wifi_ssid or data.mqtt_connected is not None:
@@ -855,8 +836,8 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
             if data.mqtt_connected is not None:
                 status = "Connected" if data.mqtt_connected else "Disconnected"
                 print(f"  MQTT:       {status}")
-            if data.ip_address:
-                print(f"  IP:         {data.ip_address}")
+            if data.network_info:
+                print(f"  Network:    {data.network_info}")
 
         # System Config
         if data.config_mode is not None or data.ct_polling_rate is not None:
@@ -865,9 +846,8 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
                 print(f"  Config Mode: {data.config_mode}")
             if data.ct_polling_rate is not None:
                 print(f"  CT Rate:     {data.ct_polling_rate}s")
-            if data.local_api_enabled is not None:
-                status = "Enabled" if data.local_api_enabled else "Disabled"
-                print(f"  Local API:   {status}")
+            if data.local_api_status is not None:
+                print(f"  Local API:   {data.local_api_status}")
 
     print("\n" + "=" * 100)
     print(f"✓ Successfully read data from {len(testers)} device(s)")
@@ -949,29 +929,33 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
                 print(f"  Type:       {data.device_type}")
             if data.device_id:
                 print(f"  ID:         {data.device_id}")
-            if data.device_mac:
-                print(f"  MAC:        {data.device_mac}")
+            if data.mac_address:
+                print(f"  MAC:        {data.mac_address}")
             if data.firmware_version:
                 print(f"  Firmware:   {data.firmware_version}")
 
         # Battery Status
         print("\n🔋 Battery Status:")
-        if data.soc is not None:
-            print(f"  SOC:        {data.soc:.1f}%")
-        if data.soh is not None:
-            print(f"  SOH:        {data.soh:.1f}%")
-        if data.voltage is not None:
-            print(f"  Voltage:    {data.voltage:.2f} V")
-        if data.current is not None:
-            print(f"  Current:    {data.current:.2f} A")
-        if data.power is not None:
-            print(f"  Power:      {data.power:.1f} W")
-        if data.temperature is not None:
-            print(f"  Temp:       {data.temperature:.1f} °C")
+        if data.battery_soc is not None:
+            print(f"  SOC:        {data.battery_soc:.1f}%")
+        if data.battery_soh is not None:
+            print(f"  SOH:        {data.battery_soh:.1f}%")
+        if data.battery_voltage is not None:
+            print(f"  Voltage:    {data.battery_voltage:.2f} V")
+        if data.battery_current is not None:
+            print(f"  Current:    {data.battery_current:.2f} A")
+        # Calculate power from voltage * current
+        if data.battery_voltage is not None and data.battery_current is not None:
+            power = data.battery_voltage * data.battery_current
+            print(f"  Power:      {power:.1f} W")
+        if data.battery_temp is not None:
+            print(f"  Temp:       {data.battery_temp:.1f} °C")
         if data.design_capacity is not None:
             print(f"  Capacity:   {data.design_capacity} Wh (design)")
-        if data.remaining_capacity is not None:
-            print(f"              {data.remaining_capacity} Wh (remaining)")
+            # Calculate remaining capacity from SOC
+            if data.battery_soc is not None:
+                remaining = (data.battery_soc / 100.0) * data.design_capacity
+                print(f"              {remaining:.0f} Wh (remaining)")
 
         # Cell Voltages
         if data.cell_voltages and any(v is not None for v in data.cell_voltages):
@@ -981,14 +965,14 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
                     print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
 
         # Runtime Info
-        if data.output_power is not None or data.max_temp is not None:
+        if data.out1_power is not None or data.temp_high is not None:
             print("\n⏱️  Runtime Info:")
-            if data.output_power is not None:
-                print(f"  Output:     {data.output_power:.1f} W")
-            if data.max_temp is not None:
-                print(f"  Max Temp:   {data.max_temp:.1f} °C")
-            if data.min_temp is not None:
-                print(f"  Min Temp:   {data.min_temp:.1f} °C")
+            if data.out1_power is not None:
+                print(f"  Output:     {data.out1_power:.1f} W")
+            if data.temp_high is not None:
+                print(f"  Max Temp:   {data.temp_high:.1f} °C")
+            if data.temp_low is not None:
+                print(f"  Min Temp:   {data.temp_low:.1f} °C")
 
         # Network Status
         if data.wifi_ssid or data.mqtt_connected is not None:
@@ -998,8 +982,8 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
             if data.mqtt_connected is not None:
                 status = "Connected" if data.mqtt_connected else "Disconnected"
                 print(f"  MQTT:       {status}")
-            if data.ip_address:
-                print(f"  IP:         {data.ip_address}")
+            if data.network_info:
+                print(f"  Network:    {data.network_info}")
 
         # System Config
         if data.config_mode is not None or data.ct_polling_rate is not None:
@@ -1008,9 +992,8 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
                 print(f"  Config Mode: {data.config_mode}")
             if data.ct_polling_rate is not None:
                 print(f"  CT Rate:     {data.ct_polling_rate}s")
-            if data.local_api_enabled is not None:
-                status = "Enabled" if data.local_api_enabled else "Disabled"
-                print(f"  Local API:   {status}")
+            if data.local_api_status is not None:
+                print(f"  Local API:   {data.local_api_status}")
 
     print("\n" + "=" * 100)
     print(f"✓ Successfully read data from {len(testers)} device(s) via proxy")
