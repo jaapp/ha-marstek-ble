@@ -14,6 +14,10 @@ Test the BLE protocol implementation independently to determine if issues are:
 - ✅ Uses the **same BLE protocol logic** as the Home Assistant integration
 - ✅ Runs standalone on macOS (no Home Assistant required)
 - ✅ Auto-discovers Marstek devices via BLE scanning
+- ✅ **Statistics mode** - Measures command response times with P95/P99 percentiles
+- ✅ **Sequential vs Parallel** - Test command execution modes to identify BLE contention
+- ✅ **ESPHome Proxy support** - Test via Bluetooth proxy to simulate HA behavior
+- ✅ **Persistent connections** - Maintains connections like Home Assistant does
 - ✅ Reads all sensor data (battery, runtime, network, etc.)
 - ✅ Displays diagnostics and connection statistics
 - ✅ Detailed logging for troubleshooting
@@ -38,10 +42,12 @@ Test the BLE protocol implementation independently to determine if issues are:
 
    Or manually:
    ```bash
-   python3 -m pip install bleak bleak-retry-connector
+   python3 -m pip install bleak bleak-retry-connector aioesphomeapi
    ```
 
    **Note:** Use `python3 -m pip` instead of just `pip` to ensure packages are installed to the correct Python interpreter.
+
+   **Note:** `aioesphomeapi` is only required if you want to test via ESPHome Bluetooth Proxy.
 
 3. **Make the script executable (optional):**
    ```bash
@@ -50,91 +56,161 @@ Test the BLE protocol implementation independently to determine if issues are:
 
 ## Usage
 
-### Basic Usage (Auto-discover)
+### Quick Test (All Modes)
 
-The simplest way - automatically finds and connects to any Marstek device:
+To quickly test all argument combinations and validate the test script:
+
+```bash
+./test_all_modes.sh
+```
+
+This runs 8 tests covering all combinations of:
+- Mode: normal vs stats
+- Execution: sequential vs parallel
+- Connection: direct BLE vs ESPHome proxy
+
+### Basic Usage (Normal Mode)
+
+Read sensor values once (not yet implemented - use stats mode):
 
 ```bash
 python3 test_marstek_standalone.py
 ```
 
-### Connect by Device Address
+### Statistics Mode (Recommended)
 
-If you know the BLE MAC address:
+Measure command response times to optimize polling intervals:
 
 ```bash
-python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
+# Sequential commands (default - no BLE contention)
+python3 test_marstek_standalone.py --stats
+
+# Parallel commands (test if contention causes issues)
+python3 test_marstek_standalone.py --stats --parallel
+
+# More iterations for better statistics
+python3 test_marstek_standalone.py --stats --iterations 20
 ```
 
-### Connect by Device Name
+**Statistics mode output:**
+- Min/Max/Avg response times per command
+- P50/P95/P99 percentiles (use P95 for timeout recommendations)
+- Success rate per command
+- Recommended delays based on measurements
 
-If you know the device name or prefix:
+### ESPHome Bluetooth Proxy Testing
+
+Test via ESPHome proxy to simulate real Home Assistant behavior:
 
 ```bash
-python3 test_marstek_standalone.py --name MST_ACCP_1234
+# Sequential via proxy
+python3 test_marstek_standalone.py --stats \
+  --proxy 192.168.7.44 \
+  --proxy-key "your-base64-key"
+
+# Parallel via proxy (tests HA's current behavior)
+python3 test_marstek_standalone.py --stats --parallel \
+  --proxy 192.168.7.44 \
+  --proxy-key "your-base64-key"
+```
+
+**Note:** Proxy adds ~50-200ms latency to all operations. Stats will show this overhead.
+
+### Connection Management
+
+**The script ALWAYS uses persistent connections (like HA):**
+- Connects to ALL devices at startup
+- Maintains connections during all iterations
+- Disconnects only at the end
+
+### Sequential vs Parallel
+
+**Sequential (default):**
+- Sends commands to Device 1, waits for responses
+- Then Device 2, waits for responses
+- No BLE radio contention
+- More reliable
+
+**Parallel (`--parallel`):**
+- Sends commands to ALL devices simultaneously
+- May have BLE radio contention (dropped notifications)
+- Tests HA's current behavior
+
+### Filter by Device
+
+```bash
+# By BLE MAC address
+python3 test_marstek_standalone.py --stats --address AA:BB:CC:DD:EE:FF
+
+# By device name
+python3 test_marstek_standalone.py --stats --name MST_ACCP_1234
 ```
 
 ### Enable Debug Logging
 
-For troubleshooting BLE communication issues:
-
 ```bash
-python3 test_marstek_standalone.py --debug
+python3 test_marstek_standalone.py --stats --debug
 ```
 
 ## Output
 
-The script will display:
+### Stats Mode Output
 
-1. **Connection Info** - Device name and BLE address
-2. **Device Info** - Type, ID, MAC, firmware version
-3. **Battery Status** - SOC, voltage, current, power, temperature, capacity
-4. **Cell Voltages** - Individual cell voltages (up to 16 cells)
-5. **Runtime Info** - Output power, temperature ranges, connection status
-6. **Network Status** - WiFi, MQTT, network info
-7. **Adaptive Mode** - Smart meter and adaptive power settings
-8. **System Configuration** - Config mode, CT polling rate, local API
-9. **BLE Diagnostics** - Command success rates, connection status
-
-## Example Output
+Statistics mode shows command response time measurements:
 
 ```
-================================================================================
-MARSTEK BATTERY SENSOR - TEST RESULTS
-================================================================================
-Timestamp: 2025-01-15T10:30:45.123456
+📊 STATS MODE: Running 10 iterations (SEQUENTIAL, direct BLE)
+Connection Management: PERSISTENT (connect all devices once)
+Command Execution: SEQUENTIAL (no contention)
 
---- Connection Info ---
-Device Name: MST_ACCP_1234
-BLE Address: AA:BB:CC:DD:EE:FF
+Phase 1: Connecting to all devices...
+  • Connecting to MST_ACCP_d7c4... ✓
+  • Connecting to MST_ACCP_92f6... ✓
+✓ Connected to 2 device(s)
 
---- Device Info ---
-Type: HMG-50
-ID: 1234567890
-MAC Address: AA:BB:CC:DD:EE:FF
-Firmware: 1.0.4
+Phase 2: Running 10 iterations (SEQUENTIAL commands)...
 
---- Battery Status ---
-State of Charge (SOC): 85.0%
-State of Health (SOH): 100.0%
-Voltage: 51.20 V
-Current: 2.5 A
-Power: 128.0 W
-Temperature: 25.0 °C
-Design Capacity: 5120 Wh
-Remaining Capacity: 4352 Wh
-
---- Cell Voltages ---
-Cell  1: 3.200 V
-Cell  2: 3.201 V
+[Iteration 1/10]
+  • MST_ACCP_d7c4... ✓
+  • MST_ACCP_92f6... ✓
 ...
 
---- BLE Diagnostics ---
-Commands Sent: 11
-Success Rate: 100.0%
-Connected: True
-================================================================================
+Phase 3: Disconnecting all devices...
+  • Disconnected MST_ACCP_d7c4
+  • Disconnected MST_ACCP_92f6
+
+========================================================================================================================
+COMMAND RESPONSE STATISTICS (20 total samples)
+========================================================================================================================
+
+Command              Success    Min        Avg        P50        P95        P99        Max        Recommend
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Runtime Info (0x03) ⚡ 100.0%     45ms       67ms       65ms       89ms       95ms       102ms      0.1s (Fast) ⚡
+BMS Data (0x14) ⚡     100.0%     52ms       71ms       68ms       92ms       98ms       105ms      0.1s (Fast) ⚡
+Device Info (0x04)    100.0%     125ms      142ms      140ms      165ms      172ms      180ms      0.2s (Medium)
+System Data (0x0D)    95.0%      98ms       118ms      115ms      145ms      152ms      160ms      0.2s (Medium)
+WiFi SSID (0x08)      90.0%      110ms      135ms      130ms      168ms      175ms      185ms      0.2s (Medium)
+...
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+⚡ = Critical command (power monitoring) - needs fastest updates
+
+Recommendations based on P95 (95th percentile):
+  • < 150ms → Use 0.1s delay (aggressive, real-time)
+  • < 250ms → Use 0.2s delay (balanced)
+  • < 350ms → Use 0.3s delay (conservative, current HA)
+  • > 350ms → Use 0.4s+ delay (very slow device)
+
+NOTE: These timings are for DIRECT BLE.
+ESPHome Bluetooth Proxy adds ~50-200ms latency!
+Add extra margin for proxy: Fast→0.2s, Medium→0.3s, Current→0.4s
+========================================================================================================================
 ```
+
+### Normal Mode Output (Not Yet Implemented)
+
+Normal mode will display sensor values in a tabular format (to be implemented).
+For now, use `--stats` mode to test the script.
 
 ## Troubleshooting
 
@@ -222,9 +298,40 @@ The script:
 
 All the BLE protocol logic is **identical** to the Home Assistant integration - it's imported directly from `custom_components/marstek_ble/marstek_device.py`.
 
+## Test Wrapper Script
+
+The `test_all_modes.sh` script validates the test script by running all argument combinations:
+
+```bash
+./test_all_modes.sh
+```
+
+**What it tests:**
+1. Normal + Sequential + Direct BLE
+2. Normal + Parallel + Direct BLE
+3. Normal + Sequential + Proxy
+4. Normal + Parallel + Proxy
+5. Stats + Sequential + Direct BLE
+6. Stats + Parallel + Direct BLE
+7. Stats + Sequential + Proxy
+8. Stats + Parallel + Proxy
+
+**Configuration:**
+- Uses only 2 iterations per stats test (quick validation)
+- Set proxy via environment variables:
+  ```bash
+  PROXY_HOST=192.168.7.44 PROXY_KEY="your-key" ./test_all_modes.sh
+  ```
+
+**Output:**
+- Shows pass/fail for each test
+- Summary at the end
+- Exits with code 0 if all pass, 1 if any fail
+
 ## Files Used
 
 - `standalone_test/test_marstek_standalone.py` - Main test script
+- `standalone_test/test_all_modes.sh` - Wrapper to test all argument combinations
 - `custom_components/marstek_ble/marstek_device.py` - BLE protocol (imported from parent directory)
 - `standalone_test/test_requirements.txt` - Python dependencies
 
