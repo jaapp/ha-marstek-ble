@@ -349,6 +349,10 @@ class ProxyMarstekTester:
         self.stats = stats
         self.ble_connection_handle = None
 
+        # GATT handles (discovered during connection)
+        self.write_handle = None
+        self.notify_handle = None
+
         # Track command timing and responses
         self.command_responses = {}
         self.command_start_times = {}
@@ -416,6 +420,8 @@ class ProxyMarstekTester:
                     self._handle_notification(handle, data)
 
             # Subscribe to BLE callbacks
+            self.proxy_client.subscribe_bluetooth_le_connection_response(on_bluetooth_le_connection_response)
+            self.proxy_client.subscribe_bluetooth_gatt_notify(on_bluetooth_gatt_notify)
             self.proxy_client.subscribe_bluetooth_connections_free(lambda free: None)
             self.proxy_client.subscribe_bluetooth_le_raw_advertisements(lambda adv: None)
 
@@ -436,10 +442,33 @@ class ProxyMarstekTester:
                 self.connected = True
                 self.ble_connection_handle = mac_int
 
-                # Subscribe to GATT notifications
-                # Note: We'd need to discover services/characteristics first
-                # For now, we'll try to subscribe to the notify characteristic handle
-                # This may require service discovery via bluetooth_gatt_get_services()
+                # Discover services to find GATT handles
+                _LOGGER.debug(f"[Proxy] Discovering services...")
+                services = await self.proxy_client.bluetooth_gatt_get_services(mac_int)
+
+                # Find handles for write and notify characteristics
+                for service in services.services:
+                    for characteristic in service.characteristics:
+                        # ESPHome returns UUID as integer, convert to standard UUID string
+                        # Handle both 16-bit (0xff01) and 32-bit (0x0000ff01) formats
+                        uuid_int = characteristic.uuid & 0xFFFFFFFF  # Ensure 32-bit
+                        uuid_str = f"{uuid_int:08x}-0000-1000-8000-00805f9b34fb"
+
+                        _LOGGER.debug(f"[Proxy] Found characteristic: UUID={uuid_str}, handle={characteristic.handle}")
+
+                        if uuid_str == self.WRITE_CHAR_UUID:
+                            self.write_handle = characteristic.handle
+                            _LOGGER.debug(f"[Proxy] Found write characteristic at handle {self.write_handle}")
+                        elif uuid_str == self.NOTIFY_CHAR_UUID:
+                            self.notify_handle = characteristic.handle
+                            _LOGGER.debug(f"[Proxy] Found notify characteristic at handle {self.notify_handle}")
+
+                if not self.write_handle or not self.notify_handle:
+                    raise Exception(f"Failed to find required characteristics (write={self.write_handle}, notify={self.notify_handle})")
+
+                # Subscribe to GATT notifications on the notify characteristic
+                _LOGGER.debug(f"[Proxy] Subscribing to notifications on handle {self.notify_handle}")
+                await self.proxy_client.bluetooth_gatt_start_notify(mac_int, self.notify_handle)
 
                 print(" ✓")
                 return True
@@ -508,33 +537,25 @@ class ProxyMarstekTester:
             True if command sent successfully
         """
         try:
+            if not self.write_handle:
+                _LOGGER.error("[Proxy] Write handle not discovered yet")
+                return False
+
             # Build command using integration's protocol
             command_frame = MarstekProtocol.build_command(cmd, payload)
 
             _LOGGER.debug(f"[Proxy] Sending command 0x{cmd:02X}: {command_frame.hex()}")
 
-            # Send via proxy
-            # Note: We need the GATT handle for the write characteristic
-            # This requires service discovery first via bluetooth_gatt_get_services()
-            # For now, we'll attempt to write assuming we have the handle
-
+            # Send via proxy using discovered write handle
             mac_int = int(self.mac_address, 16)
 
-            # Attempt to write to the write characteristic
-            # The handle would need to be discovered via service discovery
-            # This is a placeholder - actual implementation needs proper handle
-            try:
-                await self.proxy_client.bluetooth_gatt_write(
-                    address=mac_int,
-                    handle=0,  # Placeholder - needs actual handle from service discovery
-                    data=command_frame,
-                    response=False,
-                )
-                return True
-            except Exception as write_err:
-                _LOGGER.warning(f"[Proxy] Write failed (service discovery may be needed): {write_err}")
-                # Service discovery would be implemented here
-                return False
+            await self.proxy_client.bluetooth_gatt_write(
+                address=mac_int,
+                handle=self.write_handle,
+                data=command_frame,
+                response=False,
+            )
+            return True
 
         except Exception as e:
             _LOGGER.error(f"[Proxy] Error sending command 0x{cmd:02X}: {e}")
@@ -601,14 +622,21 @@ class ProxyMarstekTester:
         """Disconnect from the device via proxy."""
         if self.connected and self.ble_connection_handle:
             try:
+                # Stop notifications first
+                if self.notify_handle:
+                    _LOGGER.debug(f"[Proxy] Stopping notifications on handle {self.notify_handle}")
+                    await self.proxy_client.bluetooth_gatt_stop_notify(self.ble_connection_handle, self.notify_handle)
+
                 # Disconnect via ESPHome API
-                # await self.proxy_client.bluetooth_device_disconnect(self.ble_connection_handle)
-                pass
+                _LOGGER.debug(f"[Proxy] Disconnecting device")
+                await self.proxy_client.bluetooth_device_disconnect(self.ble_connection_handle)
             except Exception as e:
                 _LOGGER.error(f"[Proxy] Error disconnecting: {e}")
             finally:
                 self.connected = False
                 self.ble_connection_handle = None
+                self.write_handle = None
+                self.notify_handle = None
 
 
 def print_stats_table(stats: CommandStats, iterations: int):
