@@ -410,7 +410,7 @@ class ProxyMarstekTester:
             connection_error = None
 
             # Connection callback
-            def on_bluetooth_le_connection_response(connected: bool, mtu: int, error: int) -> None:
+            def on_bluetooth_connection_state(connected: bool, mtu: int, error: int) -> None:
                 nonlocal connection_error
                 if connected:
                     _LOGGER.debug(f"[Proxy] Connected with MTU {mtu}")
@@ -425,17 +425,14 @@ class ProxyMarstekTester:
                 if address == mac_int:
                     self._handle_notification(handle, data)
 
-            # Subscribe to BLE callbacks
-            self.proxy_client.subscribe_bluetooth_le_connection_response(on_bluetooth_le_connection_response)
+            # Subscribe to GATT notification callbacks
             self.proxy_client.subscribe_bluetooth_gatt_notify(on_bluetooth_gatt_notify)
-            self.proxy_client.subscribe_bluetooth_connections_free(lambda free: None)
-            self.proxy_client.subscribe_bluetooth_le_raw_advertisements(lambda adv: None)
 
-            # Attempt connection via proxy
+            # Attempt connection via proxy (connection callback passed directly)
             try:
                 await self.proxy_client.bluetooth_device_connect(
                     address=mac_int,
-                    has_address_type=False,
+                    on_bluetooth_connection_state=on_bluetooth_connection_state,
                     address_type=0,
                 )
 
