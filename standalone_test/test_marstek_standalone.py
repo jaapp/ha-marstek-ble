@@ -432,7 +432,6 @@ class ProxyMarstekTester:
                     address=mac_int,
                     on_bluetooth_connection_state=on_bluetooth_connection_state,
                     feature_flags=self.proxy_features,
-                    address_type=0,
                 )
 
                 # Wait for connection response (with timeout)
