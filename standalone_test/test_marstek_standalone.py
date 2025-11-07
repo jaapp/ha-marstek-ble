@@ -100,8 +100,16 @@ class MarstekTester:
             _LOGGER.error(f"Failed to connect: {e}")
             return False
 
-    async def read_all_data(self) -> bool:
+    async def read_all_data(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
         """Read all sensor data from the device.
+
+        Uses the EXACT same timing as the HA coordinator:
+        - Fast delay (0.1s) for critical commands: Runtime Info, BMS Data
+        - Slow delay (0.3s) for all other commands
+
+        Args:
+            fast_delay: Delay for critical commands (default 0.1s, matches HA)
+            slow_delay: Delay for other commands (default 0.3s, matches HA)
 
         Returns:
             True if successful, False otherwise
@@ -116,67 +124,67 @@ class MarstekTester:
             # Read basic device info
             print(f"  • {device_short_name}: Device info...", end='', flush=True)
             await self.marstek_device.send_command(CMD_DEVICE_INFO)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
-            # Read runtime info
+            # Read runtime info (FAST - critical data)
             print(f"  • {device_short_name}: Runtime info...", end='', flush=True)
             await self.marstek_device.send_command(CMD_RUNTIME_INFO)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(fast_delay)  # 0.1s - matches HA coordinator
             print(" ✓")
 
-            # Read BMS data (battery info)
+            # Read BMS data (FAST - critical battery info)
             print(f"  • {device_short_name}: BMS data...", end='', flush=True)
             await self.marstek_device.send_command(CMD_BMS_DATA)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(fast_delay)  # 0.1s - matches HA coordinator
             print(" ✓")
 
             # Read system data
             print(f"  • {device_short_name}: System data...", end='', flush=True)
             await self.marstek_device.send_command(CMD_SYSTEM_DATA)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read WiFi SSID
             print(f"  • {device_short_name}: WiFi SSID...", end='', flush=True)
             await self.marstek_device.send_command(CMD_WIFI_SSID)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read config data
             print(f"  • {device_short_name}: Config data...", end='', flush=True)
             await self.marstek_device.send_command(CMD_CONFIG_DATA)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read timer info
             print(f"  • {device_short_name}: Timer info...", end='', flush=True)
             await self.marstek_device.send_command(CMD_TIMER_INFO)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read CT polling rate
             print(f"  • {device_short_name}: CT polling...", end='', flush=True)
             await self.marstek_device.send_command(CMD_CT_POLLING_RATE)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read meter IP
             print(f"  • {device_short_name}: Meter IP...", end='', flush=True)
             await self.marstek_device.send_command(CMD_METER_IP, b"\x0B")
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read network info
             print(f"  • {device_short_name}: Network info...", end='', flush=True)
             await self.marstek_device.send_command(CMD_NETWORK_INFO)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             # Read local API status
             print(f"  • {device_short_name}: Local API...", end='', flush=True)
             await self.marstek_device.send_command(CMD_LOCAL_API_STATUS)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(slow_delay)  # 0.3s
             print(" ✓")
 
             return True
@@ -453,8 +461,11 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Auto-discover and test all Marstek devices
+  # Auto-discover and test all Marstek devices (matches HA timing)
   python3 test_marstek_standalone.py
+
+  # Test devices one at a time (sequential mode)
+  python3 test_marstek_standalone.py --sequential
 
   # Connect to specific device by address
   python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
@@ -462,8 +473,13 @@ Examples:
   # Connect to device by name prefix
   python3 test_marstek_standalone.py --name MST_ACCP_1234
 
-  # Enable debug logging
+  # Enable debug logging (shows timeout warnings)
   python3 test_marstek_standalone.py --debug
+
+Note: This script uses the EXACT same timing as Home Assistant:
+  - 0.1s delay for critical commands (Runtime Info, BMS Data)
+  - 0.3s delay for all other commands
+  - 2.0s timeout for command responses
         """
     )
     parser.add_argument(
@@ -475,9 +491,14 @@ Examples:
         help="Device name or prefix (e.g., MST_ACCP_1234)"
     )
     parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Test devices sequentially instead of simultaneously (reduces BLE contention)"
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug logging"
+        help="Enable debug logging (shows timeout warnings)"
     )
     args = parser.parse_args()
 
@@ -485,6 +506,10 @@ Examples:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.getLogger("bleak").setLevel(logging.DEBUG)
+        logging.getLogger("marstek_device").setLevel(logging.DEBUG)
+    else:
+        # Suppress timeout warnings from marstek_device unless in debug mode
+        logging.getLogger("marstek_device").setLevel(logging.ERROR)
 
     try:
         # Discover devices
@@ -517,11 +542,24 @@ Examples:
             print("\n❌ ERROR: Could not connect to any devices")
             return 1
 
-        print(f"\n📊 Reading data from {len(connected_testers)} device(s)...\n")
+        mode = "sequentially" if args.sequential else "simultaneously"
+        print(f"\n📊 Reading data from {len(connected_testers)} device(s) {mode}...\n")
 
-        # Read data from all connected devices
-        read_tasks = [tester.read_all_data() for tester in connected_testers]
-        await asyncio.gather(*read_tasks, return_exceptions=True)
+        # Read data from connected devices (using HA timing: 0.1s fast, 0.3s slow)
+        if args.sequential:
+            # Sequential: one device at a time (reduces BLE contention)
+            for tester in connected_testers:
+                await tester.read_all_data()
+        else:
+            # Parallel: all devices at once (same as HA with multiple devices)
+            read_tasks = [tester.read_all_data() for tester in connected_testers]
+            await asyncio.gather(*read_tasks, return_exceptions=True)
+
+        # Add settling time for late notifications
+        if not args.debug:
+            print("\n⏱  Waiting for any delayed notifications...", end='', flush=True)
+            await asyncio.sleep(1.0)
+            print(" ✓")
 
         # Print results in table format
         print_table(connected_testers)
