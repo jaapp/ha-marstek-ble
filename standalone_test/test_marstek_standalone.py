@@ -162,9 +162,10 @@ class MarstekTester:
         if self.marstek_device:
             self.marstek_device.record_notification(sender, raw_data, result)
 
-        # Track response time for this notification
-        if result and result.get("command") is not None:
-            cmd = result["command"]
+        # Track response time for this notification (for stats mode)
+        # Extract command from raw data like integration does
+        if result and len(raw_data) > 3:
+            cmd = raw_data[3]  # Command is at byte 3
             if cmd in self.command_start_times:
                 # Calculate response time
                 response_time_ms = (time.time() - self.command_start_times[cmd]) * 1000
@@ -360,9 +361,10 @@ class ProxyMarstekTester:
         # Parse using the integration's protocol handler
         result = MarstekProtocol.parse_notification(data, self.data)
 
-        # Track response time for this notification
-        if result and result.get("command") is not None:
-            cmd = result["command"]
+        # Track response time for this notification (for stats mode)
+        # Extract command from raw data like integration does
+        if result and len(data) > 3:
+            cmd = data[3]  # Command is at byte 3
             if cmd in self.command_start_times:
                 # Calculate response time
                 response_time_ms = (time.time() - self.command_start_times[cmd]) * 1000
