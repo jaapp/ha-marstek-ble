@@ -752,6 +752,7 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
     print("\n🔍 Scanning for Marstek devices via proxy...", end='', flush=True)
 
     found_devices = []
+    total_advertisements = 0
     scan_timeout = 10.0
 
     def match_device(name: str, address: str) -> bool:
@@ -762,21 +763,34 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
         return name and any(name.startswith(prefix) for prefix in DEVICE_PREFIXES)
 
     def on_advertisement(adv: BluetoothLEAdvertisement) -> None:
+        nonlocal total_advertisements
+        total_advertisements += 1
+
         # Convert MAC int to string
         mac_str = f"{adv.address:012X}"
         mac_formatted = ":".join([mac_str[i:i+2] for i in range(0, 12, 2)])
 
-        if match_device(adv.name, mac_formatted) and (adv.address, adv.name) not in [(d[0], d[1]) for d in found_devices]:
-            found_devices.append((mac_formatted, adv.name))
+        _LOGGER.debug(f"[Proxy] Advertisement: name={adv.name}, mac={mac_formatted}, rssi={adv.rssi}")
+
+        if match_device(adv.name, mac_formatted):
+            if (mac_formatted, adv.name) not in found_devices:
+                _LOGGER.info(f"[Proxy] Found matching device: {adv.name} ({mac_formatted})")
+                found_devices.append((mac_formatted, adv.name))
+        elif adv.name and "MST" in adv.name.upper():
+            # Log any Marstek-looking devices even if they don't match our filter
+            _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {adv.name} ({mac_formatted})")
 
     try:
         # Subscribe to advertisements
+        _LOGGER.debug("[Proxy] Subscribing to BLE advertisements...")
         unsub = proxy_client.subscribe_bluetooth_le_advertisements(on_advertisement)
+        _LOGGER.debug("[Proxy] Subscription active, waiting for advertisements...")
 
         # Scan for devices
         await asyncio.sleep(scan_timeout)
 
         # Unsubscribe
+        _LOGGER.debug(f"[Proxy] Scan complete. Received {total_advertisements} total advertisements, found {len(found_devices)} matching devices. Unsubscribing...")
         unsub()
 
         print(f" Found {len(found_devices)} device(s) ✓\n")
@@ -786,6 +800,17 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
                 print(f"  • {name} ({mac})")
         else:
             print("\n⚠️  No Marstek devices found")
+            if total_advertisements == 0:
+                print("⚠️  WARNING: No BLE advertisements received at all!")
+                print("   This may indicate:")
+                print("   - ESPHome proxy is not scanning/forwarding advertisements")
+                print("   - Network connectivity issues")
+                print("   - ESPHome bluetooth_proxy component not properly configured")
+                print(f"\n   Try running with --debug flag to see detailed logging")
+            else:
+                print(f"   Received {total_advertisements} advertisements but none matched Marstek devices")
+                print(f"   Looking for devices starting with: {', '.join(DEVICE_PREFIXES)}")
+                print(f"\n   Try running with --debug flag to see all advertisements")
 
         return found_devices
 
