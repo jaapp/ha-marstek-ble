@@ -25,7 +25,13 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 
 try:
-    from aioesphomeapi import APIClient, BluetoothLEAdvertisement, BluetoothProxyFeature, BluetoothScannerMode
+    from aioesphomeapi import (
+        APIClient,
+        BluetoothLEAdvertisement,
+        BluetoothLERawAdvertisementsResponse,
+        BluetoothProxyFeature,
+        BluetoothScannerMode,
+    )
     PROXY_AVAILABLE = True
 except ImportError:
     PROXY_AVAILABLE = False
@@ -762,32 +768,58 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
             return name and name.startswith(device_name)
         return name and any(name.startswith(prefix) for prefix in DEVICE_PREFIXES)
 
-    def on_advertisement(adv: BluetoothLEAdvertisement) -> None:
+    def parse_name_from_adv_data(data: bytes) -> Optional[str]:
+        """Parse device name from BLE advertisement data."""
+        # BLE advertisement format: [len][type][data]...
+        # Type 0x08 = Shortened Local Name, 0x09 = Complete Local Name
+        i = 0
+        while i < len(data):
+            if i + 1 >= len(data):
+                break
+            length = data[i]
+            if length == 0 or i + length >= len(data):
+                break
+            ad_type = data[i + 1]
+            if ad_type in (0x08, 0x09):  # Local name
+                try:
+                    name = data[i + 2:i + 1 + length].decode('utf-8')
+                    return name
+                except:
+                    pass
+            i += 1 + length
+        return None
+
+    def on_raw_advertisements(resp: BluetoothLERawAdvertisementsResponse) -> None:
         nonlocal total_advertisements
-        total_advertisements += 1
 
-        # Convert MAC int to string
-        mac_str = f"{adv.address:012X}"
-        mac_formatted = ":".join([mac_str[i:i+2] for i in range(0, 12, 2)])
+        for adv in resp.advertisements:
+            total_advertisements += 1
 
-        _LOGGER.debug(f"[Proxy] Advertisement: name={adv.name}, mac={mac_formatted}, rssi={adv.rssi}")
+            # Convert MAC int to string
+            mac_str = f"{adv.address:012X}"
+            mac_formatted = ":".join([mac_str[i:i+2] for i in range(0, 12, 2)])
 
-        if match_device(adv.name, mac_formatted):
-            if (mac_formatted, adv.name) not in found_devices:
-                _LOGGER.info(f"[Proxy] Found matching device: {adv.name} ({mac_formatted})")
-                found_devices.append((mac_formatted, adv.name))
-        elif adv.name and "MST" in adv.name.upper():
-            # Log any Marstek-looking devices even if they don't match our filter
-            _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {adv.name} ({mac_formatted})")
+            # Parse name from advertisement data
+            name = parse_name_from_adv_data(adv.data)
+
+            _LOGGER.debug(f"[Proxy] Advertisement: name={name}, mac={mac_formatted}, rssi={adv.rssi}")
+
+            if match_device(name, mac_formatted):
+                if (mac_formatted, name) not in found_devices:
+                    _LOGGER.info(f"[Proxy] Found matching device: {name} ({mac_formatted})")
+                    found_devices.append((mac_formatted, name))
+            elif name and "MST" in name.upper():
+                # Log any Marstek-looking devices even if they don't match our filter
+                _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {name} ({mac_formatted})")
 
     try:
         # Set scanner to ACTIVE mode to receive advertisements
         _LOGGER.debug("[Proxy] Setting scanner to ACTIVE mode...")
         proxy_client.bluetooth_scanner_set_mode(BluetoothScannerMode.ACTIVE)
 
-        # Subscribe to advertisements
-        _LOGGER.debug("[Proxy] Subscribing to BLE advertisements...")
-        unsub = proxy_client.subscribe_bluetooth_le_advertisements(on_advertisement)
+        # Subscribe to raw advertisements
+        _LOGGER.debug("[Proxy] Subscribing to raw BLE advertisements...")
+        unsub = proxy_client.subscribe_bluetooth_le_raw_advertisements(on_raw_advertisements)
         _LOGGER.debug("[Proxy] Subscription active, waiting for advertisements...")
 
         # Scan for devices
