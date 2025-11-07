@@ -729,6 +729,294 @@ async def discover_devices(device_address: Optional[str] = None, device_name: Op
         return []
 
 
+async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
+    """Run regular test mode - read sensor values once and display.
+
+    Uses PERSISTENT connections - connects to ALL devices upfront,
+    reads data, then disconnects.
+
+    Args:
+        devices: List of BLE devices to test
+        parallel: If True, read from all devices simultaneously
+                 If False, read from devices sequentially
+    """
+    mode = "PARALLEL" if parallel else "SEQUENTIAL"
+    print(f"\n📡 Reading sensor values from {len(devices)} device(s) ({mode})...\n")
+
+    # PHASE 1: Connect to ALL devices
+    print("Connecting to devices...")
+    testers = []
+    for device in devices:
+        tester = MarstekTester(device, CommandStats())  # Stats not used in regular mode
+        if await tester.connect():
+            testers.append(tester)
+        else:
+            print(f"⚠️  Failed to connect to {device.name}, skipping...")
+
+    if not testers:
+        print("❌ No devices connected successfully")
+        return
+
+    print(f"✓ Connected to {len(testers)} device(s)\n")
+
+    try:
+        # PHASE 2: Read data
+        print("Reading sensor data...\n")
+
+        if parallel:
+            # Parallel mode: Read from all devices simultaneously
+            async def read_device(tester):
+                await tester.read_all_data_with_timing()
+                await asyncio.sleep(1.0)  # Settling time
+
+            await asyncio.gather(*[read_device(t) for t in testers])
+        else:
+            # Sequential mode: Read from devices one at a time
+            for tester in testers:
+                device_name = tester.ble_device.name[:20]
+                print(f"  • Reading {device_name}...", end='', flush=True)
+                await tester.read_all_data_with_timing()
+                await asyncio.sleep(1.0)  # Settling time
+                print(" ✓")
+
+    finally:
+        # PHASE 3: Disconnect
+        print("\nDisconnecting...")
+        for tester in testers:
+            await tester.disconnect()
+
+    # Display results
+    print("\n" + "=" * 100)
+    print("MARSTEK BATTERY SENSOR - TEST RESULTS")
+    print("=" * 100)
+
+    for tester in testers:
+        data = tester.data
+        device_name = tester.ble_device.name
+        device_addr = tester.ble_device.address
+
+        print(f"\n{'─' * 100}")
+        print(f"Device: {device_name} ({device_addr})")
+        print(f"{'─' * 100}")
+
+        # Device Info
+        if data.device_type or data.device_id:
+            print("\n📋 Device Info:")
+            if data.device_type:
+                print(f"  Type:       {data.device_type}")
+            if data.device_id:
+                print(f"  ID:         {data.device_id}")
+            if data.device_mac:
+                print(f"  MAC:        {data.device_mac}")
+            if data.firmware_version:
+                print(f"  Firmware:   {data.firmware_version}")
+
+        # Battery Status
+        print("\n🔋 Battery Status:")
+        if data.soc is not None:
+            print(f"  SOC:        {data.soc:.1f}%")
+        if data.soh is not None:
+            print(f"  SOH:        {data.soh:.1f}%")
+        if data.voltage is not None:
+            print(f"  Voltage:    {data.voltage:.2f} V")
+        if data.current is not None:
+            print(f"  Current:    {data.current:.2f} A")
+        if data.power is not None:
+            print(f"  Power:      {data.power:.1f} W")
+        if data.temperature is not None:
+            print(f"  Temp:       {data.temperature:.1f} °C")
+        if data.design_capacity is not None:
+            print(f"  Capacity:   {data.design_capacity} Wh (design)")
+        if data.remaining_capacity is not None:
+            print(f"              {data.remaining_capacity} Wh (remaining)")
+
+        # Cell Voltages
+        if data.cell_voltages and any(v is not None for v in data.cell_voltages):
+            print("\n⚡ Cell Voltages:")
+            for i, voltage in enumerate(data.cell_voltages):
+                if voltage is not None:
+                    print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
+
+        # Runtime Info
+        if data.output_power is not None or data.max_temp is not None:
+            print("\n⏱️  Runtime Info:")
+            if data.output_power is not None:
+                print(f"  Output:     {data.output_power:.1f} W")
+            if data.max_temp is not None:
+                print(f"  Max Temp:   {data.max_temp:.1f} °C")
+            if data.min_temp is not None:
+                print(f"  Min Temp:   {data.min_temp:.1f} °C")
+
+        # Network Status
+        if data.wifi_ssid or data.mqtt_connected is not None:
+            print("\n🌐 Network:")
+            if data.wifi_ssid:
+                print(f"  WiFi:       {data.wifi_ssid}")
+            if data.mqtt_connected is not None:
+                status = "Connected" if data.mqtt_connected else "Disconnected"
+                print(f"  MQTT:       {status}")
+            if data.ip_address:
+                print(f"  IP:         {data.ip_address}")
+
+        # System Config
+        if data.config_mode is not None or data.ct_polling_rate is not None:
+            print("\n⚙️  Configuration:")
+            if data.config_mode is not None:
+                print(f"  Config Mode: {data.config_mode}")
+            if data.ct_polling_rate is not None:
+                print(f"  CT Rate:     {data.ct_polling_rate}s")
+            if data.local_api_enabled is not None:
+                status = "Enabled" if data.local_api_enabled else "Disabled"
+                print(f"  Local API:   {status}")
+
+    print("\n" + "=" * 100)
+    print(f"✓ Successfully read data from {len(testers)} device(s)")
+    print("=" * 100 + "\n")
+
+
+async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[str, str]], parallel: bool = False):
+    """Run regular test mode via ESPHome Bluetooth Proxy - read sensor values once.
+
+    Args:
+        proxy_client: Connected ESPHome API client
+        devices: List of (mac_address, device_name) tuples
+        parallel: If True, read from all devices simultaneously
+                 If False, read from devices sequentially
+    """
+    mode = "PARALLEL" if parallel else "SEQUENTIAL"
+    print(f"\n📡 Reading sensor values from {len(devices)} device(s) via proxy ({mode})...\n")
+
+    # PHASE 1: Connect to ALL devices
+    print("Connecting to devices via proxy...")
+    testers = []
+    for mac_address, device_name in devices:
+        tester = ProxyMarstekTester(mac_address, device_name, proxy_client, CommandStats())
+        if await tester.connect():
+            testers.append(tester)
+        else:
+            print(f"⚠️  Failed to connect to {device_name}, skipping...")
+
+    if not testers:
+        print("❌ No devices connected successfully")
+        return
+
+    print(f"✓ Connected to {len(testers)} device(s)\n")
+
+    try:
+        # PHASE 2: Read data
+        print("Reading sensor data...\n")
+
+        if parallel:
+            # Parallel mode: Read from all devices simultaneously
+            async def read_device(tester):
+                await tester.read_all_data_with_timing()
+                await asyncio.sleep(1.0)  # Settling time
+
+            await asyncio.gather(*[read_device(t) for t in testers])
+        else:
+            # Sequential mode: Read from devices one at a time
+            for tester in testers:
+                device_name = tester.device_name[:20]
+                print(f"  • Reading {device_name}...", end='', flush=True)
+                await tester.read_all_data_with_timing()
+                await asyncio.sleep(1.0)  # Settling time
+                print(" ✓")
+
+    finally:
+        # PHASE 3: Disconnect
+        print("\nDisconnecting...")
+        for tester in testers:
+            await tester.disconnect()
+
+    # Display results
+    print("\n" + "=" * 100)
+    print("MARSTEK BATTERY SENSOR - TEST RESULTS (VIA ESPHOME PROXY)")
+    print("=" * 100)
+
+    for tester in testers:
+        data = tester.data
+        device_name = tester.device_name
+        mac_address = tester.mac_address
+
+        print(f"\n{'─' * 100}")
+        print(f"Device: {device_name} ({mac_address})")
+        print(f"{'─' * 100}")
+
+        # Device Info
+        if data.device_type or data.device_id:
+            print("\n📋 Device Info:")
+            if data.device_type:
+                print(f"  Type:       {data.device_type}")
+            if data.device_id:
+                print(f"  ID:         {data.device_id}")
+            if data.device_mac:
+                print(f"  MAC:        {data.device_mac}")
+            if data.firmware_version:
+                print(f"  Firmware:   {data.firmware_version}")
+
+        # Battery Status
+        print("\n🔋 Battery Status:")
+        if data.soc is not None:
+            print(f"  SOC:        {data.soc:.1f}%")
+        if data.soh is not None:
+            print(f"  SOH:        {data.soh:.1f}%")
+        if data.voltage is not None:
+            print(f"  Voltage:    {data.voltage:.2f} V")
+        if data.current is not None:
+            print(f"  Current:    {data.current:.2f} A")
+        if data.power is not None:
+            print(f"  Power:      {data.power:.1f} W")
+        if data.temperature is not None:
+            print(f"  Temp:       {data.temperature:.1f} °C")
+        if data.design_capacity is not None:
+            print(f"  Capacity:   {data.design_capacity} Wh (design)")
+        if data.remaining_capacity is not None:
+            print(f"              {data.remaining_capacity} Wh (remaining)")
+
+        # Cell Voltages
+        if data.cell_voltages and any(v is not None for v in data.cell_voltages):
+            print("\n⚡ Cell Voltages:")
+            for i, voltage in enumerate(data.cell_voltages):
+                if voltage is not None:
+                    print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
+
+        # Runtime Info
+        if data.output_power is not None or data.max_temp is not None:
+            print("\n⏱️  Runtime Info:")
+            if data.output_power is not None:
+                print(f"  Output:     {data.output_power:.1f} W")
+            if data.max_temp is not None:
+                print(f"  Max Temp:   {data.max_temp:.1f} °C")
+            if data.min_temp is not None:
+                print(f"  Min Temp:   {data.min_temp:.1f} °C")
+
+        # Network Status
+        if data.wifi_ssid or data.mqtt_connected is not None:
+            print("\n🌐 Network:")
+            if data.wifi_ssid:
+                print(f"  WiFi:       {data.wifi_ssid}")
+            if data.mqtt_connected is not None:
+                status = "Connected" if data.mqtt_connected else "Disconnected"
+                print(f"  MQTT:       {status}")
+            if data.ip_address:
+                print(f"  IP:         {data.ip_address}")
+
+        # System Config
+        if data.config_mode is not None or data.ct_polling_rate is not None:
+            print("\n⚙️  Configuration:")
+            if data.config_mode is not None:
+                print(f"  Config Mode: {data.config_mode}")
+            if data.ct_polling_rate is not None:
+                print(f"  CT Rate:     {data.ct_polling_rate}s")
+            if data.local_api_enabled is not None:
+                status = "Enabled" if data.local_api_enabled else "Disabled"
+                print(f"  Local API:   {status}")
+
+    print("\n" + "=" * 100)
+    print(f"✓ Successfully read data from {len(testers)} device(s) via proxy")
+    print("=" * 100 + "\n")
+
+
 async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10, parallel: bool = False):
     """Run statistics collection mode with local BLE.
 
@@ -1016,10 +1304,7 @@ PROXY MODE:
                     return 0
 
                 # Regular test mode
-                print(f"\n📡 Testing {len(proxy_devices)} device(s) via proxy...\n")
-                print("Regular test mode via proxy to be implemented...")
-                print("Use --stats mode to measure response times.")
-
+                await run_regular_mode_via_proxy(proxy_client, proxy_devices, args.parallel)
                 return 0
 
             finally:
@@ -1041,13 +1326,7 @@ PROXY MODE:
                 return 0
 
             # Regular test mode
-            mode = "in parallel" if args.parallel else "sequentially"
-            print(f"\n📡 Testing {len(devices)} device(s) {mode}...\n")
-
-            # For now, just print message that regular mode will be implemented
-            print("Regular test mode output to be implemented...")
-            print("Use --stats mode to measure response times.")
-
+            await run_regular_mode(devices, args.parallel)
             return 0
 
     except KeyboardInterrupt:

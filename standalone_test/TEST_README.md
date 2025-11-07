@@ -71,10 +71,14 @@ This runs 8 tests covering all combinations of:
 
 ### Basic Usage (Normal Mode)
 
-Read sensor values once (not yet implemented - use stats mode):
+Read sensor values once and display in a readable format:
 
 ```bash
+# Sequential (default)
 python3 test_marstek_standalone.py
+
+# Parallel (read from all devices simultaneously)
+python3 test_marstek_standalone.py --parallel
 ```
 
 ### Statistics Mode (Recommended)
@@ -207,10 +211,78 @@ Add extra margin for proxy: Fast→0.2s, Medium→0.3s, Current→0.4s
 ========================================================================================================================
 ```
 
-### Normal Mode Output (Not Yet Implemented)
+### Normal Mode Output
 
-Normal mode will display sensor values in a tabular format (to be implemented).
-For now, use `--stats` mode to test the script.
+Normal mode displays sensor values in a readable format:
+
+```
+📡 Reading sensor values from 2 device(s) (SEQUENTIAL)...
+
+Connecting to devices...
+  • Connecting to MST_ACCP_d7c4... ✓
+  • Connecting to MST_ACCP_92f6... ✓
+✓ Connected to 2 device(s)
+
+Reading sensor data...
+  • Reading MST_ACCP_d7c4... ✓
+  • Reading MST_ACCP_92f6... ✓
+
+Disconnecting...
+
+====================================================================================================
+MARSTEK BATTERY SENSOR - TEST RESULTS
+====================================================================================================
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+Device: MST_ACCP_d7c4 (C7C929F7-DE17-5DF6-8FFE-0E74B1AFC509)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+📋 Device Info:
+  Type:       HMG-50
+  ID:         1234567890
+  MAC:        AA:BB:CC:DD:EE:FF
+  Firmware:   1.0.4
+
+🔋 Battery Status:
+  SOC:        85.0%
+  SOH:        100.0%
+  Voltage:    51.20 V
+  Current:    2.5 A
+  Power:      128.0 W
+  Temp:       25.0 °C
+  Capacity:   5120 Wh (design)
+              4352 Wh (remaining)
+
+⚡ Cell Voltages:
+  Cell  1:    3.200 V
+  Cell  2:    3.201 V
+  Cell  3:    3.199 V
+  ...
+
+⏱️  Runtime Info:
+  Output:     128.0 W
+  Max Temp:   26.5 °C
+  Min Temp:   24.0 °C
+
+🌐 Network:
+  WiFi:       MyNetwork
+  MQTT:       Connected
+  IP:         192.168.1.100
+
+⚙️  Configuration:
+  Config Mode: 2
+  CT Rate:     5s
+  Local API:   Enabled
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+Device: MST_ACCP_92f6 (...)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+[... device 2 data ...]
+
+====================================================================================================
+✓ Successfully read data from 2 device(s)
+====================================================================================================
+```
 
 ## Troubleshooting
 
