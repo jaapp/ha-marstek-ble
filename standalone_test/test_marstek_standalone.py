@@ -421,12 +421,8 @@ class ProxyMarstekTester:
                     connection_success.set()
 
             # Notification callback
-            def on_bluetooth_gatt_notify(address: int, handle: int, data: bytes) -> None:
-                if address == mac_int:
-                    self._handle_notification(handle, data)
-
-            # Subscribe to GATT notification callbacks
-            self.proxy_client.subscribe_bluetooth_gatt_notify(on_bluetooth_gatt_notify)
+            def on_gatt_notify(handle: int, data: bytearray) -> None:
+                self._handle_notification(handle, bytes(data))
 
             # Attempt connection via proxy (connection callback passed directly)
             try:
@@ -471,7 +467,11 @@ class ProxyMarstekTester:
 
                 # Subscribe to GATT notifications on the notify characteristic
                 _LOGGER.debug(f"[Proxy] Subscribing to notifications on handle {self.notify_handle}")
-                await self.proxy_client.bluetooth_gatt_start_notify(mac_int, self.notify_handle)
+                await self.proxy_client.bluetooth_gatt_start_notify(
+                    address=mac_int,
+                    handle=self.notify_handle,
+                    on_bluetooth_gatt_notify=on_gatt_notify,
+                )
 
                 print(" ✓")
                 return True
@@ -755,6 +755,7 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
     print("\n🔍 Scanning for Marstek devices via proxy...", end='', flush=True)
 
     found_devices = []
+    warned_devices = set()  # Track devices we've already warned about
     total_advertisements = 0
     scan_timeout = 10.0
 
@@ -806,8 +807,10 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
                     _LOGGER.info(f"[Proxy] Found matching device: {name} ({mac_formatted})")
                     found_devices.append((mac_formatted, name))
             elif name and "MST" in name.upper():
-                # Log any Marstek-looking devices even if they don't match our filter
-                _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {name} ({mac_formatted})")
+                # Log any Marstek-looking devices even if they don't match our filter (only once per device)
+                if mac_formatted not in warned_devices:
+                    _LOGGER.warning(f"[Proxy] Found Marstek-like device but didn't match filter: {name} ({mac_formatted})")
+                    warned_devices.add(mac_formatted)
 
     try:
         # Set scanner to ACTIVE mode to receive advertisements
