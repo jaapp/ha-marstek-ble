@@ -125,78 +125,46 @@ class MarstekTester:
         try:
             device_short_name = self.ble_device.name[:20] if self.ble_device.name else "Unknown"
 
-            # Helper to send command and track timing
-            async def send_and_track(cmd: int, name: str, payload: bytes = b"", delay: float = 0.3):
-                import time
+            # Helper to send command (no immediate tracking, we'll check after settling)
+            async def send_cmd(cmd: int, name: str, payload: bytes = b"", delay: float = 0.3):
                 print(f"  • {device_short_name}: {name}...", end='', flush=True)
-
-                # Get diagnostics before
-                diag_before = self.marstek_device.get_diagnostics()
-                cmd_stats_before = diag_before.get("command_stats", {}).get(f"0x{cmd:02X}", {})
-                notifications_before = cmd_stats_before.get("last_notification")
-
-                start_time = time.time()
                 success = await self.marstek_device.send_command(cmd, payload)
                 await asyncio.sleep(delay)
-
-                # Get diagnostics after
-                diag_after = self.marstek_device.get_diagnostics()
-                cmd_stats_after = diag_after.get("command_stats", {}).get(f"0x{cmd:02X}", {})
-                notifications_after = cmd_stats_after.get("last_notification")
-
-                # Check if we got a response
-                got_response = notifications_after and notifications_after != notifications_before
-                self.command_responses[cmd] = got_response
-
-                # Calculate response time if we got one
-                if got_response and notifications_after:
-                    # Parse ISO timestamp
-                    from datetime import datetime
-                    notif_time = datetime.fromisoformat(notifications_after.replace('Z', '+00:00'))
-                    response_time_ms = (notif_time.timestamp() - start_time) * 1000
-                    self.command_timings[cmd] = response_time_ms
-                else:
-                    self.command_timings[cmd] = None
-
-                if got_response:
-                    print(" ✓")
-                else:
-                    print(" ⚠")  # Warning - no response
-
+                print(" ✓")
                 return success
 
             # Read basic device info
-            await send_and_track(CMD_DEVICE_INFO, "Device info", delay=slow_delay)
+            await send_cmd(CMD_DEVICE_INFO, "Device info", delay=slow_delay)
 
             # Read runtime info (FAST - critical data)
-            await send_and_track(CMD_RUNTIME_INFO, "Runtime info", delay=fast_delay)
+            await send_cmd(CMD_RUNTIME_INFO, "Runtime info", delay=fast_delay)
 
             # Read BMS data (FAST - critical battery info)
-            await send_and_track(CMD_BMS_DATA, "BMS data", delay=fast_delay)
+            await send_cmd(CMD_BMS_DATA, "BMS data", delay=fast_delay)
 
             # Read system data
-            await send_and_track(CMD_SYSTEM_DATA, "System data", delay=slow_delay)
+            await send_cmd(CMD_SYSTEM_DATA, "System data", delay=slow_delay)
 
             # Read WiFi SSID
-            await send_and_track(CMD_WIFI_SSID, "WiFi SSID", delay=slow_delay)
+            await send_cmd(CMD_WIFI_SSID, "WiFi SSID", delay=slow_delay)
 
             # Read config data
-            await send_and_track(CMD_CONFIG_DATA, "Config data", delay=slow_delay)
+            await send_cmd(CMD_CONFIG_DATA, "Config data", delay=slow_delay)
 
             # Read timer info
-            await send_and_track(CMD_TIMER_INFO, "Timer info", delay=slow_delay)
+            await send_cmd(CMD_TIMER_INFO, "Timer info", delay=slow_delay)
 
             # Read CT polling rate
-            await send_and_track(CMD_CT_POLLING_RATE, "CT polling", delay=slow_delay)
+            await send_cmd(CMD_CT_POLLING_RATE, "CT polling", delay=slow_delay)
 
             # Read meter IP
-            await send_and_track(CMD_METER_IP, "Meter IP", payload=b"\x0B", delay=slow_delay)
+            await send_cmd(CMD_METER_IP, "Meter IP", payload=b"\x0B", delay=slow_delay)
 
             # Read network info
-            await send_and_track(CMD_NETWORK_INFO, "Network info", delay=slow_delay)
+            await send_cmd(CMD_NETWORK_INFO, "Network info", delay=slow_delay)
 
             # Read local API status
-            await send_and_track(CMD_LOCAL_API_STATUS, "Local API", delay=slow_delay)
+            await send_cmd(CMD_LOCAL_API_STATUS, "Local API", delay=slow_delay)
 
             return True
 
@@ -204,6 +172,35 @@ class MarstekTester:
             print(f" ✗")
             _LOGGER.error(f"Error reading data: {e}")
             return False
+
+    def analyze_command_responses(self) -> None:
+        """Analyze diagnostics to determine which commands got responses.
+
+        Call this AFTER all commands have been sent and settling time has passed.
+        """
+        if not self.marstek_device:
+            return
+
+        diag = self.marstek_device.get_diagnostics()
+        cmd_stats = diag.get("command_stats", {})
+
+        # Check each command we sent
+        for cmd in [CMD_DEVICE_INFO, CMD_RUNTIME_INFO, CMD_BMS_DATA, CMD_SYSTEM_DATA,
+                    CMD_WIFI_SSID, CMD_CONFIG_DATA, CMD_TIMER_INFO, CMD_CT_POLLING_RATE,
+                    CMD_METER_IP, CMD_NETWORK_INFO, CMD_LOCAL_API_STATUS]:
+
+            cmd_hex = f"0x{cmd:02X}"
+            stats = cmd_stats.get(cmd_hex, {})
+
+            # Check if we got any notification for this command
+            last_notification = stats.get("last_notification")
+            got_response = last_notification is not None
+
+            self.command_responses[cmd] = got_response
+
+            # Store timing info if available (we don't have accurate start times,
+            # so this will just show "got response" vs "no response")
+            self.command_timings[cmd] = None
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
@@ -244,11 +241,22 @@ def print_table(testers: list[MarstekTester]) -> None:
     device_names = []
     for tester in testers:
         name = tester.ble_device.name if tester.ble_device.name else tester.ble_device.address
-        device_names.append(name[:15])  # Truncate long names
+        device_names.append(name[:20])  # Truncate long names
 
-    # Column widths
+    # Dynamic column widths based on actual data
     label_width = 30
-    col_width = 18
+
+    # Calculate required column width by checking actual values
+    max_value_width = 0
+    for tester in testers:
+        # Check BLE address length (these tend to be longest)
+        max_value_width = max(max_value_width, len(tester.ble_device.address))
+        # Check device name
+        if tester.ble_device.name:
+            max_value_width = max(max_value_width, len(tester.ble_device.name[:20]))
+
+    # Set column width with minimum of 18, max of what's needed
+    col_width = max(18, min(max_value_width + 2, 40))
 
     # Helper function to print a row
     def print_row(label: str, values: list[str], separator: str = "│"):
@@ -440,20 +448,7 @@ def print_table(testers: list[MarstekTester]) -> None:
             else:
                 response_status.append("-")
 
-        # Response times
-        response_times = []
-        for t in testers:
-            if cmd in t.command_timings and t.command_timings[cmd] is not None:
-                ms = t.command_timings[cmd]
-                if ms < 1000:
-                    response_times.append(f"{ms:.0f}ms")
-                else:
-                    response_times.append(f"{ms/1000:.1f}s")
-            else:
-                response_times.append("NO RESP")
-
         print_row(f"{name} (0x{cmd:02X})", response_status)
-        print_row(f"  └─ Response Time", response_times)
 
     print_separator()
 
@@ -617,6 +612,10 @@ Note: This script uses the EXACT same timing as Home Assistant:
             print("\n⏱  Waiting for any delayed notifications...", end='', flush=True)
             await asyncio.sleep(1.0)
             print(" ✓")
+
+        # Analyze which commands got responses (after settling period)
+        for tester in connected_testers:
+            tester.analyze_command_responses()
 
         # Print results in table format
         print_table(connected_testers)
