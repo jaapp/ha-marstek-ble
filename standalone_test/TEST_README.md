@@ -26,7 +26,12 @@ Test the BLE protocol implementation independently to determine if issues are:
 
 ## Installation
 
-1. **Install Python dependencies:**
+1. **Navigate to the standalone_test directory:**
+   ```bash
+   cd standalone_test
+   ```
+
+2. **Install Python dependencies:**
    ```bash
    pip install -r test_requirements.txt
    ```
@@ -36,7 +41,7 @@ Test the BLE protocol implementation independently to determine if issues are:
    pip install bleak bleak-retry-connector
    ```
 
-2. **Make the script executable (optional):**
+3. **Make the script executable (optional):**
    ```bash
    chmod +x test_marstek_standalone.py
    ```
@@ -217,9 +222,9 @@ All the BLE protocol logic is **identical** to the Home Assistant integration - 
 
 ## Files Used
 
-- `test_marstek_standalone.py` - Main test script
-- `custom_components/marstek_ble/marstek_device.py` - BLE protocol (imported)
-- `test_requirements.txt` - Python dependencies
+- `standalone_test/test_marstek_standalone.py` - Main test script
+- `custom_components/marstek_ble/marstek_device.py` - BLE protocol (imported from parent directory)
+- `standalone_test/test_requirements.txt` - Python dependencies
 
 ## Support
 

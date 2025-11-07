@@ -22,7 +22,8 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 
 # Import the integration's BLE logic
-sys.path.insert(0, 'custom_components/marstek_ble')
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_components', 'marstek_ble'))
 from marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
 # Constants from the integration
