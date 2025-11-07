@@ -338,18 +338,20 @@ class ProxyMarstekTester:
     WRITE_CHAR_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
     NOTIFY_CHAR_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
 
-    def __init__(self, mac_address: str, device_name: str, proxy_client: APIClient, proxy_features: int, stats: CommandStats):
+    def __init__(self, mac_address: str, device_name: str, address_type: int, proxy_client: APIClient, proxy_features: int, stats: CommandStats):
         """Initialize the proxy tester.
 
         Args:
             mac_address: BLE MAC address of device
             device_name: Name of device
+            address_type: BLE address type (0=public, 1=random)
             proxy_client: Connected ESPHome API client
             proxy_features: Bluetooth proxy feature flags
             stats: Shared stats collector
         """
         self.mac_address = mac_address.upper().replace(":", "")  # ESPHome uses MAC without colons
         self.device_name = device_name
+        self.address_type = address_type
         self.proxy_client = proxy_client
         self.proxy_features = proxy_features
         self.data = MarstekData()
@@ -432,6 +434,7 @@ class ProxyMarstekTester:
                     address=mac_int,
                     on_bluetooth_connection_state=on_bluetooth_connection_state,
                     feature_flags=self.proxy_features,
+                    address_type=self.address_type,
                 )
 
                 # Wait for connection response (with timeout)
@@ -746,7 +749,7 @@ async def connect_to_proxy(proxy_host: str, proxy_key: str) -> Optional[APIClien
         return None
 
 
-async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Optional[str] = None, device_name: Optional[str] = None) -> list[tuple[str, str]]:
+async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Optional[str] = None, device_name: Optional[str] = None) -> list[tuple[str, str, int]]:
     """Discover Marstek devices via ESPHome Bluetooth Proxy.
 
     Args:
@@ -755,7 +758,7 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
         device_name: Optional device name filter
 
     Returns:
-        List of (mac_address, device_name) tuples
+        List of (mac_address, device_name, address_type) tuples
     """
     print("\n🔍 Scanning for Marstek devices via proxy...", end='', flush=True)
 
@@ -805,12 +808,16 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
             # Parse name from advertisement data
             name = parse_name_from_adv_data(adv.data)
 
-            _LOGGER.debug(f"[Proxy] Advertisement: name={name}, mac={mac_formatted}, rssi={adv.rssi}")
+            # Get address type (0=public, 1=random)
+            address_type = getattr(adv, 'address_type', 0)  # Default to 0 (public) if not present
+
+            _LOGGER.debug(f"[Proxy] Advertisement: name={name}, mac={mac_formatted}, address_type={address_type}, rssi={adv.rssi}")
 
             if match_device(name, mac_formatted):
-                if (mac_formatted, name) not in found_devices:
-                    _LOGGER.info(f"[Proxy] Found matching device: {name} ({mac_formatted})")
-                    found_devices.append((mac_formatted, name))
+                # Check if we already found this device (by MAC only, ignore name/address_type changes)
+                if not any(d[0] == mac_formatted for d in found_devices):
+                    _LOGGER.info(f"[Proxy] Found matching device: {name} ({mac_formatted}) address_type={address_type}")
+                    found_devices.append((mac_formatted, name, address_type))
             elif name and "MST" in name.upper():
                 # Log any Marstek-looking devices even if they don't match our filter (only once per device)
                 if mac_formatted not in warned_devices:
@@ -840,7 +847,7 @@ async def discover_devices_via_proxy(proxy_client: APIClient, device_address: Op
         print(f" Found {len(found_devices)} device(s) ✓\n")
 
         if found_devices:
-            for mac, name in found_devices:
+            for mac, name, addr_type in found_devices:
                 print(f"  • {name} ({mac})")
         else:
             print("\n⚠️  No Marstek devices found")
@@ -1054,13 +1061,13 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
     print("=" * 120 + "\n")
 
 
-async def run_regular_mode_via_proxy(proxy_client: APIClient, proxy_features: int, devices: list[tuple[str, str]], parallel: bool = False):
+async def run_regular_mode_via_proxy(proxy_client: APIClient, proxy_features: int, devices: list[tuple[str, str, int]], parallel: bool = False):
     """Run regular test mode via ESPHome Bluetooth Proxy - read sensor values once.
 
     Args:
         proxy_client: Connected ESPHome API client
         proxy_features: Bluetooth proxy feature flags
-        devices: List of (mac_address, device_name) tuples
+        devices: List of (mac_address, device_name, address_type) tuples
         parallel: If True, read from all devices simultaneously
                  If False, read from devices sequentially
     """
@@ -1070,8 +1077,8 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, proxy_features: in
     # PHASE 1: Connect to ALL devices
     print("Connecting to devices via proxy...")
     testers = []
-    for mac_address, device_name in devices:
-        tester = ProxyMarstekTester(mac_address, device_name, proxy_client, proxy_features, CommandStats())
+    for mac_address, device_name, address_type in devices:
+        tester = ProxyMarstekTester(mac_address, device_name, address_type, proxy_client, proxy_features, CommandStats())
         if await tester.connect():
             testers.append(tester)
         else:
@@ -1290,7 +1297,7 @@ async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10, paralle
     print_stats_table(stats, iterations * len(testers))
 
 
-async def run_stats_mode_via_proxy(proxy_client: APIClient, proxy_features: int, devices: list[tuple[str, str]], iterations: int = 10, parallel: bool = False):
+async def run_stats_mode_via_proxy(proxy_client: APIClient, proxy_features: int, devices: list[tuple[str, str, int]], iterations: int = 10, parallel: bool = False):
     """Run statistics collection mode via ESPHome Bluetooth Proxy.
 
     Uses PERSISTENT connections (like HA does) - connects to ALL devices upfront,
@@ -1299,7 +1306,7 @@ async def run_stats_mode_via_proxy(proxy_client: APIClient, proxy_features: int,
     Args:
         proxy_client: Connected ESPHome API client
         proxy_features: Bluetooth proxy feature flags
-        devices: List of (mac_address, device_name) tuples
+        devices: List of (mac_address, device_name, address_type) tuples
         iterations: Number of test iterations
         parallel: If True, send commands to all devices simultaneously (BLE contention risk)
                  If False, send commands sequentially (one device at a time)
@@ -1316,8 +1323,8 @@ async def run_stats_mode_via_proxy(proxy_client: APIClient, proxy_features: int,
     # PHASE 1: Connect to ALL devices
     print("Phase 1: Connecting to all devices via proxy...")
     testers = []
-    for mac_address, device_name in devices:
-        tester = ProxyMarstekTester(mac_address, device_name, proxy_client, proxy_features, stats)
+    for mac_address, device_name, address_type in devices:
+        tester = ProxyMarstekTester(mac_address, device_name, address_type, proxy_client, proxy_features, stats)
         if await tester.connect():
             testers.append(tester)
         else:
