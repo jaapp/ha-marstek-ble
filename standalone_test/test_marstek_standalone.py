@@ -729,113 +729,175 @@ async def discover_devices(device_address: Optional[str] = None, device_name: Op
         return []
 
 
-async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10):
+async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10, parallel: bool = False):
     """Run statistics collection mode with local BLE.
 
-    Uses PERSISTENT connections (like HA does) - connects once per device,
-    runs all iterations on that connection, then disconnects.
+    Uses PERSISTENT connections (like HA does) - connects to ALL devices upfront,
+    runs iterations, then disconnects all at the end.
+
+    Args:
+        devices: List of BLE devices to test
+        iterations: Number of test iterations
+        parallel: If True, send commands to all devices simultaneously (BLE contention risk)
+                 If False, send commands sequentially (one device at a time)
     """
-    print(f"\n📊 STATS MODE: Running {iterations} iterations (sequential, direct BLE)")
-    print(f"Using PERSISTENT connections (connect once per device)")
-    print(f"This will take ~{iterations * len(devices) * 5} seconds...\n")
+    mode = "PARALLEL" if parallel else "SEQUENTIAL"
+    print(f"\n📊 STATS MODE: Running {iterations} iterations ({mode}, direct BLE)")
+    print(f"Connection Management: PERSISTENT (connect all devices once)")
+    print(f"Command Execution: {mode} {'(may have BLE contention!)' if parallel else '(no contention)'}")
+    print(f"This will take ~{iterations * 5} seconds...\n")
 
     stats = CommandStats()
 
-    # Test each device with persistent connection
+    # PHASE 1: Connect to ALL devices
+    print("Phase 1: Connecting to all devices...")
+    testers = []
     for device in devices:
         tester = MarstekTester(device, stats)
-
-        if not await tester.connect():
+        if await tester.connect():
+            testers.append(tester)
+        else:
             print(f"⚠️  Failed to connect to {device.name}, skipping...")
-            continue
 
-        try:
-            # Run all iterations on this persistent connection
-            for i in range(iterations):
-                print(f"  • Iteration {i+1}/{iterations}...", end='', flush=True)
+    if not testers:
+        print("❌ No devices connected successfully")
+        return
 
-                # Reset tracking for this iteration
-                tester.reset_iteration_tracking()
+    print(f"✓ Connected to {len(testers)} device(s)\n")
 
-                await tester.read_all_data_with_timing()
+    try:
+        # PHASE 2: Run iterations (sequential or parallel)
+        print(f"Phase 2: Running {iterations} iterations ({mode} commands)...")
 
-                # Settling time for late notifications
-                await asyncio.sleep(1.0)
+        for i in range(iterations):
+            print(f"\n[Iteration {i+1}/{iterations}]")
 
-                # Analyze responses
-                tester.analyze_responses()
+            if parallel:
+                # Parallel mode: Send commands to all devices simultaneously
+                async def test_device(tester):
+                    tester.reset_iteration_tracking()
+                    await tester.read_all_data_with_timing()
+                    await asyncio.sleep(1.0)  # Settling time
+                    tester.analyze_responses()
 
-                print(" ✓")
+                # Run all devices in parallel
+                await asyncio.gather(*[test_device(t) for t in testers])
+                print("  ✓ All devices completed")
 
-                # Brief pause between iterations (but stay connected!)
-                await asyncio.sleep(0.5)
+            else:
+                # Sequential mode: Send commands to devices one at a time
+                for tester in testers:
+                    device_name = tester.ble_device.name[:20]
+                    print(f"  • {device_name}...", end='', flush=True)
 
-        finally:
-            # Disconnect once at the end
+                    tester.reset_iteration_tracking()
+                    await tester.read_all_data_with_timing()
+                    await asyncio.sleep(1.0)  # Settling time
+                    tester.analyze_responses()
+
+                    print(" ✓")
+
+            # Brief pause between iterations
+            await asyncio.sleep(0.5)
+
+    finally:
+        # PHASE 3: Disconnect all devices
+        print("\nPhase 3: Disconnecting all devices...")
+        for tester in testers:
             await tester.disconnect()
-            print(f"  • Disconnected from {device.name}\n")
+            print(f"  • Disconnected {tester.ble_device.name}")
 
     # Print statistics
-    print_stats_table(stats, iterations * len(devices))
+    print()
+    print_stats_table(stats, iterations * len(testers))
 
 
-async def run_stats_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[str, str]], iterations: int = 10):
+async def run_stats_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[str, str]], iterations: int = 10, parallel: bool = False):
     """Run statistics collection mode via ESPHome Bluetooth Proxy.
 
-    Uses PERSISTENT connections (like HA does) - connects once per device,
-    runs all iterations on that connection, then disconnects.
+    Uses PERSISTENT connections (like HA does) - connects to ALL devices upfront,
+    runs iterations, then disconnects all at the end.
 
     Args:
         proxy_client: Connected ESPHome API client
         devices: List of (mac_address, device_name) tuples
         iterations: Number of test iterations
+        parallel: If True, send commands to all devices simultaneously (BLE contention risk)
+                 If False, send commands sequentially (one device at a time)
     """
-    print(f"\n📊 STATS MODE: Running {iterations} iterations (sequential, via ESPHome proxy)")
-    print(f"Using PERSISTENT connections (connect once per device)")
+    mode = "PARALLEL" if parallel else "SEQUENTIAL"
+    print(f"\n📊 STATS MODE: Running {iterations} iterations ({mode}, via ESPHome proxy)")
+    print(f"Connection Management: PERSISTENT (connect all devices once)")
+    print(f"Command Execution: {mode} {'(may have BLE contention!)' if parallel else '(no contention)'}")
     print(f"⚠️  NOTE: Proxy adds ~50-200ms latency to all operations!")
-    print(f"This will take ~{iterations * len(devices) * 5} seconds...\n")
+    print(f"This will take ~{iterations * 5} seconds...\n")
 
     stats = CommandStats()
 
-    # Test each device with persistent connection
+    # PHASE 1: Connect to ALL devices
+    print("Phase 1: Connecting to all devices via proxy...")
+    testers = []
     for mac_address, device_name in devices:
         tester = ProxyMarstekTester(mac_address, device_name, proxy_client, stats)
-
-        if not await tester.connect():
+        if await tester.connect():
+            testers.append(tester)
+        else:
             print(f"⚠️  Failed to connect to {device_name}, skipping...")
-            continue
 
-        try:
-            # Run all iterations on this persistent connection
-            for i in range(iterations):
-                print(f"  • Iteration {i+1}/{iterations}...", end='', flush=True)
+    if not testers:
+        print("❌ No devices connected successfully")
+        return
 
-                # Reset tracking for this iteration
-                tester.reset_iteration_tracking()
+    print(f"✓ Connected to {len(testers)} device(s)\n")
 
-                await tester.read_all_data_with_timing()
+    try:
+        # PHASE 2: Run iterations (sequential or parallel)
+        print(f"Phase 2: Running {iterations} iterations ({mode} commands)...")
 
-                # Settling time for late notifications
-                await asyncio.sleep(1.0)
+        for i in range(iterations):
+            print(f"\n[Iteration {i+1}/{iterations}]")
 
-                # Analyze responses
-                tester.analyze_responses()
+            if parallel:
+                # Parallel mode: Send commands to all devices simultaneously
+                async def test_device(tester):
+                    tester.reset_iteration_tracking()
+                    await tester.read_all_data_with_timing()
+                    await asyncio.sleep(1.0)  # Settling time
+                    tester.analyze_responses()
 
-                print(" ✓")
+                # Run all devices in parallel
+                await asyncio.gather(*[test_device(t) for t in testers])
+                print("  ✓ All devices completed")
 
-                # Brief pause between iterations (but stay connected!)
-                await asyncio.sleep(0.5)
+            else:
+                # Sequential mode: Send commands to devices one at a time
+                for tester in testers:
+                    device_name = tester.device_name[:20]
+                    print(f"  • {device_name}...", end='', flush=True)
 
-        finally:
-            # Disconnect once at the end
+                    tester.reset_iteration_tracking()
+                    await tester.read_all_data_with_timing()
+                    await asyncio.sleep(1.0)  # Settling time
+                    tester.analyze_responses()
+
+                    print(" ✓")
+
+            # Brief pause between iterations
+            await asyncio.sleep(0.5)
+
+    finally:
+        # PHASE 3: Disconnect all devices
+        print("\nPhase 3: Disconnecting all devices...")
+        for tester in testers:
             await tester.disconnect()
-            print(f"  • Disconnected from {device_name}\n")
+            print(f"  • Disconnected {tester.device_name}")
 
     # Print statistics (with proxy note)
+    print()
     print("\n" + "=" * 120)
-    print(f"COMMAND RESPONSE STATISTICS ({iterations * len(devices)} total samples) - VIA ESPHOME PROXY")
+    print(f"COMMAND RESPONSE STATISTICS ({iterations * len(testers)} total samples) - VIA ESPHOME PROXY")
     print("=" * 120)
-    print_stats_table(stats, iterations * len(devices))
+    print_stats_table(stats, iterations * len(testers))
 
 
 async def main():
@@ -845,28 +907,37 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test devices via DIRECT BLE (Mac's Bluetooth radio)
+  # Test devices SEQUENTIALLY (default - no BLE contention)
   python3 test_marstek_standalone.py --stats
 
-  # Test devices via ESPHOME BLUETOOTH PROXY
+  # Test devices in PARALLEL (commands to all devices at once - may have contention)
+  python3 test_marstek_standalone.py --stats --parallel
+
+  # Test via ESPHOME BLUETOOTH PROXY
   python3 test_marstek_standalone.py --stats \\
     --proxy 192.168.7.44 \\
     --proxy-key "istH+Pnjbxgury0LoTU4UBzqchEbp70upkgwQHb9bBQ="
 
-  # Test devices in parallel (may have BLE contention)
-  python3 test_marstek_standalone.py --parallel
-
-  # Run more iterations for better statistics
+  # More iterations for better statistics
   python3 test_marstek_standalone.py --stats --iterations 20
 
   # Connect to specific device
   python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF --stats
 
-Note: Sequential mode is DEFAULT because it's more reliable.
-Parallel mode may have BLE contention issues with multiple devices.
+Connection Management:
+  - ALWAYS maintains persistent connections to ALL devices (like HA does)
+  - Connects to all devices upfront, disconnects at the end
+  - Never reconnects between iterations
 
-PROXY MODE: Use --proxy to test via ESPHome Bluetooth Proxy.
-This simulates real Home Assistant behavior and includes proxy latency!
+Sequential vs Parallel (--parallel flag):
+  - SEQUENTIAL (default): Send commands to Device 1, wait, then Device 2, etc.
+    → No BLE radio contention, more reliable
+  - PARALLEL: Send commands to all devices simultaneously
+    → May have BLE contention, tests HA's current behavior
+
+PROXY MODE:
+  Use --proxy to test via ESPHome Bluetooth Proxy.
+  Simulates real Home Assistant behavior including proxy latency (~50-200ms).
         """
     )
     parser.add_argument(
@@ -880,7 +951,7 @@ This simulates real Home Assistant behavior and includes proxy latency!
     parser.add_argument(
         "--parallel",
         action="store_true",
-        help="Test devices in parallel (may have BLE contention)"
+        help="Send commands to all devices simultaneously (may have BLE contention). Default is sequential (one device at a time)."
     )
     parser.add_argument(
         "--stats",
@@ -941,7 +1012,7 @@ This simulates real Home Assistant behavior and includes proxy latency!
 
                 # Stats mode via proxy
                 if args.stats:
-                    await run_stats_mode_via_proxy(proxy_client, proxy_devices, args.iterations)
+                    await run_stats_mode_via_proxy(proxy_client, proxy_devices, args.iterations, args.parallel)
                     return 0
 
                 # Regular test mode
@@ -966,7 +1037,7 @@ This simulates real Home Assistant behavior and includes proxy latency!
 
             # Stats mode
             if args.stats:
-                await run_stats_mode(devices, args.iterations)
+                await run_stats_mode(devices, args.iterations, args.parallel)
                 return 0
 
             # Regular test mode
