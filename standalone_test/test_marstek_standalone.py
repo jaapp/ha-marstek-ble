@@ -166,6 +166,11 @@ class MarstekTester:
         else:
             _LOGGER.debug("Failed to parse notification")
 
+    def reset_iteration_tracking(self) -> None:
+        """Reset tracking for a new iteration (keeps connection alive)."""
+        self.command_responses = {}
+        self.command_start_times = {}
+
     async def connect(self) -> bool:
         """Connect to the device.
 
@@ -336,6 +341,11 @@ class ProxyMarstekTester:
             _LOGGER.debug("[Proxy] Notification parsed successfully")
         else:
             _LOGGER.debug("[Proxy] Failed to parse notification")
+
+    def reset_iteration_tracking(self) -> None:
+        """Reset tracking for a new iteration (keeps connection alive)."""
+        self.command_responses = {}
+        self.command_start_times = {}
 
     async def connect(self) -> bool:
         """Connect to the device via ESPHome proxy.
@@ -720,20 +730,33 @@ async def discover_devices(device_address: Optional[str] = None, device_name: Op
 
 
 async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10):
-    """Run statistics collection mode with local BLE."""
+    """Run statistics collection mode with local BLE.
+
+    Uses PERSISTENT connections (like HA does) - connects once per device,
+    runs all iterations on that connection, then disconnects.
+    """
     print(f"\n📊 STATS MODE: Running {iterations} iterations (sequential, direct BLE)")
-    print(f"This will take ~{iterations * 5} seconds...\n")
+    print(f"Using PERSISTENT connections (connect once per device)")
+    print(f"This will take ~{iterations * len(devices) * 5} seconds...\n")
 
     stats = CommandStats()
 
-    for i in range(iterations):
-        print(f"\n[Iteration {i+1}/{iterations}]")
+    # Test each device with persistent connection
+    for device in devices:
+        tester = MarstekTester(device, stats)
 
-        # Test each device sequentially
-        for device in devices:
-            tester = MarstekTester(device, stats)
+        if not await tester.connect():
+            print(f"⚠️  Failed to connect to {device.name}, skipping...")
+            continue
 
-            if await tester.connect():
+        try:
+            # Run all iterations on this persistent connection
+            for i in range(iterations):
+                print(f"  • Iteration {i+1}/{iterations}...", end='', flush=True)
+
+                # Reset tracking for this iteration
+                tester.reset_iteration_tracking()
+
                 await tester.read_all_data_with_timing()
 
                 # Settling time for late notifications
@@ -742,17 +765,25 @@ async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10):
                 # Analyze responses
                 tester.analyze_responses()
 
-                await tester.disconnect()
+                print(" ✓")
 
-                # Brief pause between devices
+                # Brief pause between iterations (but stay connected!)
                 await asyncio.sleep(0.5)
 
+        finally:
+            # Disconnect once at the end
+            await tester.disconnect()
+            print(f"  • Disconnected from {device.name}\n")
+
     # Print statistics
-    print_stats_table(stats, iterations)
+    print_stats_table(stats, iterations * len(devices))
 
 
 async def run_stats_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[str, str]], iterations: int = 10):
     """Run statistics collection mode via ESPHome Bluetooth Proxy.
+
+    Uses PERSISTENT connections (like HA does) - connects once per device,
+    runs all iterations on that connection, then disconnects.
 
     Args:
         proxy_client: Connected ESPHome API client
@@ -760,19 +791,28 @@ async def run_stats_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[
         iterations: Number of test iterations
     """
     print(f"\n📊 STATS MODE: Running {iterations} iterations (sequential, via ESPHome proxy)")
-    print(f"This will take ~{iterations * 5} seconds...\n")
-    print("⚠️  NOTE: Proxy adds ~50-200ms latency to all operations!\n")
+    print(f"Using PERSISTENT connections (connect once per device)")
+    print(f"⚠️  NOTE: Proxy adds ~50-200ms latency to all operations!")
+    print(f"This will take ~{iterations * len(devices) * 5} seconds...\n")
 
     stats = CommandStats()
 
-    for i in range(iterations):
-        print(f"\n[Iteration {i+1}/{iterations}]")
+    # Test each device with persistent connection
+    for mac_address, device_name in devices:
+        tester = ProxyMarstekTester(mac_address, device_name, proxy_client, stats)
 
-        # Test each device sequentially
-        for mac_address, device_name in devices:
-            tester = ProxyMarstekTester(mac_address, device_name, proxy_client, stats)
+        if not await tester.connect():
+            print(f"⚠️  Failed to connect to {device_name}, skipping...")
+            continue
 
-            if await tester.connect():
+        try:
+            # Run all iterations on this persistent connection
+            for i in range(iterations):
+                print(f"  • Iteration {i+1}/{iterations}...", end='', flush=True)
+
+                # Reset tracking for this iteration
+                tester.reset_iteration_tracking()
+
                 await tester.read_all_data_with_timing()
 
                 # Settling time for late notifications
@@ -781,16 +821,21 @@ async def run_stats_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[
                 # Analyze responses
                 tester.analyze_responses()
 
-                await tester.disconnect()
+                print(" ✓")
 
-                # Brief pause between devices
+                # Brief pause between iterations (but stay connected!)
                 await asyncio.sleep(0.5)
+
+        finally:
+            # Disconnect once at the end
+            await tester.disconnect()
+            print(f"  • Disconnected from {device_name}\n")
 
     # Print statistics (with proxy note)
     print("\n" + "=" * 120)
-    print(f"COMMAND RESPONSE STATISTICS ({iterations} iterations) - VIA ESPHOME PROXY")
+    print(f"COMMAND RESPONSE STATISTICS ({iterations * len(devices)} total samples) - VIA ESPHOME PROXY")
     print("=" * 120)
-    print_stats_table(stats, iterations)
+    print_stats_table(stats, iterations * len(devices))
 
 
 async def main():
