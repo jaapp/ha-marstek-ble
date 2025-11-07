@@ -208,8 +208,53 @@ class MarstekTester:
             _LOGGER.error(f"Failed to connect: {e}")
             return False
 
+    async def read_all_data(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
+        """Read all sensor data using integration's approach (for regular mode).
+
+        This matches the integration's _send_and_sleep() logic exactly:
+        - Send command via send_command()
+        - Sleep for delay
+        - No timing tracking
+
+        Args:
+            fast_delay: Delay for critical commands (default 0.1s, matches HA)
+            slow_delay: Delay for other commands (default 0.3s, matches HA)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.marstek_device:
+            return False
+
+        try:
+            # Helper matching integration's _send_and_sleep()
+            async def send_and_sleep(cmd: int, payload: bytes = b"", delay: float = 0.3):
+                if not await self.marstek_device.send_command(cmd, payload):
+                    _LOGGER.warning(f"Failed to send command 0x{cmd:02X}")
+                if delay:
+                    await asyncio.sleep(delay)
+
+            # Send commands exactly like coordinator does
+            await send_and_sleep(CMD_DEVICE_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_RUNTIME_INFO, delay=fast_delay)
+            await send_and_sleep(CMD_BMS_DATA, delay=fast_delay)
+            await send_and_sleep(CMD_SYSTEM_DATA, delay=slow_delay)
+            await send_and_sleep(CMD_WIFI_SSID, delay=slow_delay)
+            await send_and_sleep(CMD_CONFIG_DATA, delay=slow_delay)
+            await send_and_sleep(CMD_TIMER_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_CT_POLLING_RATE, delay=slow_delay)
+            await send_and_sleep(CMD_METER_IP, payload=b"\x0B", delay=slow_delay)
+            await send_and_sleep(CMD_NETWORK_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_LOCAL_API_STATUS, delay=slow_delay)
+
+            return True
+
+        except Exception as e:
+            _LOGGER.error(f"Error reading data: {e}")
+            return False
+
     async def read_all_data_with_timing(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
-        """Read all sensor data and track response times.
+        """Read all sensor data and track response times (for stats mode).
 
         Args:
             fast_delay: Delay for critical commands (default 0.1s, matches HA)
@@ -403,6 +448,51 @@ class ProxyMarstekTester:
         except Exception as e:
             print(f" ✗ ({e})")
             _LOGGER.error(f"[Proxy] Failed to connect: {e}")
+            return False
+
+    async def read_all_data(self, fast_delay: float = 0.1, slow_delay: float = 0.3) -> bool:
+        """Read all sensor data using integration's approach (for regular mode via proxy).
+
+        This matches the integration's _send_and_sleep() logic exactly:
+        - Send command via send_command_via_proxy()
+        - Sleep for delay
+        - No timing tracking
+
+        Args:
+            fast_delay: Delay for critical commands (default 0.1s, matches HA)
+            slow_delay: Delay for other commands (default 0.3s, matches HA)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.connected:
+            return False
+
+        try:
+            # Helper matching integration's _send_and_sleep()
+            async def send_and_sleep(cmd: int, payload: bytes = b"", delay: float = 0.3):
+                if not await self.send_command_via_proxy(cmd, payload):
+                    _LOGGER.warning(f"[Proxy] Failed to send command 0x{cmd:02X}")
+                if delay:
+                    await asyncio.sleep(delay)
+
+            # Send commands exactly like coordinator does
+            await send_and_sleep(CMD_DEVICE_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_RUNTIME_INFO, delay=fast_delay)
+            await send_and_sleep(CMD_BMS_DATA, delay=fast_delay)
+            await send_and_sleep(CMD_SYSTEM_DATA, delay=slow_delay)
+            await send_and_sleep(CMD_WIFI_SSID, delay=slow_delay)
+            await send_and_sleep(CMD_CONFIG_DATA, delay=slow_delay)
+            await send_and_sleep(CMD_TIMER_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_CT_POLLING_RATE, delay=slow_delay)
+            await send_and_sleep(CMD_METER_IP, payload=b"\x0B", delay=slow_delay)
+            await send_and_sleep(CMD_NETWORK_INFO, delay=slow_delay)
+            await send_and_sleep(CMD_LOCAL_API_STATUS, delay=slow_delay)
+
+            return True
+
+        except Exception as e:
+            _LOGGER.error(f"[Proxy] Error reading data: {e}")
             return False
 
     async def send_command_via_proxy(self, cmd: int, payload: bytes = b"") -> bool:
@@ -743,7 +833,7 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
         if parallel:
             # Parallel mode: Read from all devices simultaneously
             async def read_device(tester):
-                await tester.read_all_data_with_timing()
+                await tester.read_all_data()  # Uses integration's approach
                 await asyncio.sleep(1.0)  # Settling time
 
             await asyncio.gather(*[read_device(t) for t in testers])
@@ -752,7 +842,7 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
             for tester in testers:
                 device_name = tester.ble_device.name[:20]
                 print(f"  • Reading {device_name}...", end='', flush=True)
-                await tester.read_all_data_with_timing()
+                await tester.read_all_data()  # Uses integration's approach
                 await asyncio.sleep(1.0)  # Settling time
                 print(" ✓")
 
@@ -889,7 +979,7 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
         if parallel:
             # Parallel mode: Read from all devices simultaneously
             async def read_device(tester):
-                await tester.read_all_data_with_timing()
+                await tester.read_all_data()  # Uses integration's approach
                 await asyncio.sleep(1.0)  # Settling time
 
             await asyncio.gather(*[read_device(t) for t in testers])
@@ -898,7 +988,7 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
             for tester in testers:
                 device_name = tester.device_name[:20]
                 print(f"  • Reading {device_name}...", end='', flush=True)
-                await tester.read_all_data_with_timing()
+                await tester.read_all_data()  # Uses integration's approach
                 await asyncio.sleep(1.0)  # Settling time
                 print(" ✓")
 
