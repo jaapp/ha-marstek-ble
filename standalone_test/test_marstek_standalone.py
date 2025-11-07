@@ -409,6 +409,8 @@ class ProxyMarstekTester:
             # Convert MAC address to int for ESPHome API (it uses MAC as uint64)
             mac_int = int(self.mac_address, 16)
 
+            _LOGGER.info(f"[Proxy] Connecting to {self.mac_address} (int={mac_int}, address_type={self.address_type}, features={self.proxy_features})")
+
             # Connection state
             connection_success = asyncio.Event()
             connection_error = None
@@ -416,6 +418,7 @@ class ProxyMarstekTester:
             # Connection callback
             def on_bluetooth_connection_state(connected: bool, mtu: int, error: int) -> None:
                 nonlocal connection_error
+                _LOGGER.info(f"[Proxy] Connection callback: connected={connected}, mtu={mtu}, error={error}")
                 if connected:
                     _LOGGER.debug(f"[Proxy] Connected with MTU {mtu}")
                     connection_success.set()
