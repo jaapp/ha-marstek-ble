@@ -854,96 +854,102 @@ async def run_regular_mode(devices: list[BLEDevice], parallel: bool = False):
         for tester in testers:
             await tester.disconnect()
 
-    # Display results
-    print("\n" + "=" * 100)
+    # Display results in TABULAR format (devices as columns, values as rows)
+    print("\n" + "=" * 120)
     print("MARSTEK BATTERY SENSOR - TEST RESULTS")
-    print("=" * 100)
+    print("=" * 120)
 
-    for tester in testers:
-        data = tester.data
-        device_name = tester.ble_device.name
-        device_addr = tester.ble_device.address
+    # Determine column widths
+    device_names = [t.ble_device.name for t in testers]
+    max_name_width = max(len(name) for name in device_names)
+    col_width = max(18, min(max_name_width + 2, 40))
 
-        print(f"\n{'─' * 100}")
-        print(f"Device: {device_name} ({device_addr})")
-        print(f"{'─' * 100}")
+    # Header row
+    header = f"{'Metric':<30}"
+    for name in device_names:
+        header += f"{name:<{col_width}}"
+    print("\n" + header)
+    print("─" * (30 + col_width * len(testers)))
 
-        # Device Info
-        if data.device_type or data.device_id:
-            print("\n📋 Device Info:")
-            if data.device_type:
-                print(f"  Type:       {data.device_type}")
-            if data.device_id:
-                print(f"  ID:         {data.device_id}")
-            if data.mac_address:
-                print(f"  MAC:        {data.mac_address}")
-            if data.firmware_version:
-                print(f"  Firmware:   {data.firmware_version}")
+    # Helper to format row
+    def print_row(label, values, unit=""):
+        row = f"{label:<30}"
+        for val in values:
+            if val is not None:
+                formatted = f"{val}{unit}"
+                row += f"{formatted:<{col_width}}"
+            else:
+                row += f"{'-':<{col_width}}"
+        print(row)
 
-        # Battery Status
-        print("\n🔋 Battery Status:")
-        if data.battery_soc is not None:
-            print(f"  SOC:        {data.battery_soc:.1f}%")
-        if data.battery_soh is not None:
-            print(f"  SOH:        {data.battery_soh:.1f}%")
-        if data.battery_voltage is not None:
-            print(f"  Voltage:    {data.battery_voltage:.2f} V")
-        if data.battery_current is not None:
-            print(f"  Current:    {data.battery_current:.2f} A")
-        # Calculate power from voltage * current
-        if data.battery_voltage is not None and data.battery_current is not None:
-            power = data.battery_voltage * data.battery_current
-            print(f"  Power:      {power:.1f} W")
-        if data.battery_temp is not None:
-            print(f"  Temp:       {data.battery_temp:.1f} °C")
-        if data.design_capacity is not None:
-            print(f"  Capacity:   {data.design_capacity} Wh (design)")
-            # Calculate remaining capacity from SOC
-            if data.battery_soc is not None:
-                remaining = (data.battery_soc / 100.0) * data.design_capacity
-                print(f"              {remaining:.0f} Wh (remaining)")
+    # Device Info section
+    print("\n📋 Device Info:")
+    print_row("  Type", [t.data.device_type for t in testers])
+    print_row("  Firmware", [t.data.firmware_version for t in testers])
 
-        # Cell Voltages
-        if data.cell_voltages and any(v is not None for v in data.cell_voltages):
-            print("\n⚡ Cell Voltages:")
-            for i, voltage in enumerate(data.cell_voltages):
-                if voltage is not None:
-                    print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
+    # Battery Status section
+    print("\n🔋 Battery Status:")
+    print_row("  SOC", [f"{t.data.battery_soc:.1f}%" if t.data.battery_soc is not None else None for t in testers])
+    print_row("  SOH", [f"{t.data.battery_soh:.1f}%" if t.data.battery_soh is not None else None for t in testers])
+    print_row("  Voltage", [f"{t.data.battery_voltage:.2f}V" if t.data.battery_voltage is not None else None for t in testers])
+    print_row("  Current", [f"{t.data.battery_current:.2f}A" if t.data.battery_current is not None else None for t in testers])
 
-        # Runtime Info
-        if data.out1_power is not None or data.temp_high is not None:
-            print("\n⏱️  Runtime Info:")
-            if data.out1_power is not None:
-                print(f"  Output:     {data.out1_power:.1f} W")
-            if data.temp_high is not None:
-                print(f"  Max Temp:   {data.temp_high:.1f} °C")
-            if data.temp_low is not None:
-                print(f"  Min Temp:   {data.temp_low:.1f} °C")
+    # Calculate and show power
+    powers = []
+    for t in testers:
+        if t.data.battery_voltage is not None and t.data.battery_current is not None:
+            powers.append(f"{t.data.battery_voltage * t.data.battery_current:.1f}W")
+        else:
+            powers.append(None)
+    print_row("  Power", powers)
 
-        # Network Status
-        if data.wifi_ssid or data.mqtt_connected is not None:
-            print("\n🌐 Network:")
-            if data.wifi_ssid:
-                print(f"  WiFi:       {data.wifi_ssid}")
-            if data.mqtt_connected is not None:
-                status = "Connected" if data.mqtt_connected else "Disconnected"
-                print(f"  MQTT:       {status}")
-            if data.network_info:
-                print(f"  Network:    {data.network_info}")
+    print_row("  Temperature", [f"{t.data.battery_temp:.1f}°C" if t.data.battery_temp is not None else None for t in testers])
+    print_row("  Design Capacity", [f"{t.data.design_capacity}Wh" if t.data.design_capacity is not None else None for t in testers])
 
-        # System Config
-        if data.config_mode is not None or data.ct_polling_rate is not None:
-            print("\n⚙️  Configuration:")
-            if data.config_mode is not None:
-                print(f"  Config Mode: {data.config_mode}")
-            if data.ct_polling_rate is not None:
-                print(f"  CT Rate:     {data.ct_polling_rate}s")
-            if data.local_api_status is not None:
-                print(f"  Local API:   {data.local_api_status}")
+    # Calculate and show remaining capacity
+    remaining = []
+    for t in testers:
+        if t.data.battery_soc is not None and t.data.design_capacity is not None:
+            rem = (t.data.battery_soc / 100.0) * t.data.design_capacity
+            remaining.append(f"{rem:.0f}Wh")
+        else:
+            remaining.append(None)
+    print_row("  Remaining Capacity", remaining)
 
-    print("\n" + "=" * 100)
+    # Runtime Info section
+    print("\n⏱️  Runtime Info:")
+    print_row("  Output Power", [f"{t.data.out1_power:.1f}W" if t.data.out1_power is not None else None for t in testers])
+    print_row("  Max Temp", [f"{t.data.temp_high:.1f}°C" if t.data.temp_high is not None else None for t in testers])
+    print_row("  Min Temp", [f"{t.data.temp_low:.1f}°C" if t.data.temp_low is not None else None for t in testers])
+
+    # Network Status section
+    print("\n🌐 Network:")
+    print_row("  WiFi SSID", [t.data.wifi_ssid for t in testers])
+    print_row("  MQTT", ["Connected" if t.data.mqtt_connected else "Disconnected" if t.data.mqtt_connected is not None else None for t in testers])
+
+    # Configuration section
+    print("\n⚙️  Configuration:")
+    print_row("  Config Mode", [str(t.data.config_mode) if t.data.config_mode is not None else None for t in testers])
+    print_row("  CT Polling Rate", [f"{t.data.ct_polling_rate}s" if t.data.ct_polling_rate is not None else None for t in testers])
+    print_row("  Local API", [t.data.local_api_status for t in testers])
+
+    # Cell voltages section (show first 8 cells if any)
+    any_cell_voltages = any(t.data.cell_voltages and any(v is not None for v in t.data.cell_voltages) for t in testers)
+    if any_cell_voltages:
+        print("\n⚡ Cell Voltages:")
+        for i in range(8):  # Show first 8 cells
+            cell_values = []
+            for t in testers:
+                if t.data.cell_voltages and len(t.data.cell_voltages) > i and t.data.cell_voltages[i] is not None:
+                    cell_values.append(f"{t.data.cell_voltages[i]:.3f}V")
+                else:
+                    cell_values.append(None)
+            if any(v is not None for v in cell_values):
+                print_row(f"  Cell {i+1}", cell_values)
+
+    print("\n" + "=" * 120)
     print(f"✓ Successfully read data from {len(testers)} device(s)")
-    print("=" * 100 + "\n")
+    print("=" * 120 + "\n")
 
 
 async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tuple[str, str]], parallel: bool = False):
@@ -1000,96 +1006,102 @@ async def run_regular_mode_via_proxy(proxy_client: APIClient, devices: list[tupl
         for tester in testers:
             await tester.disconnect()
 
-    # Display results
-    print("\n" + "=" * 100)
+    # Display results in TABULAR format (devices as columns, values as rows)
+    print("\n" + "=" * 120)
     print("MARSTEK BATTERY SENSOR - TEST RESULTS (VIA ESPHOME PROXY)")
-    print("=" * 100)
+    print("=" * 120)
 
-    for tester in testers:
-        data = tester.data
-        device_name = tester.device_name
-        mac_address = tester.mac_address
+    # Determine column widths
+    device_names = [t.device_name for t in testers]
+    max_name_width = max(len(name) for name in device_names)
+    col_width = max(18, min(max_name_width + 2, 40))
 
-        print(f"\n{'─' * 100}")
-        print(f"Device: {device_name} ({mac_address})")
-        print(f"{'─' * 100}")
+    # Header row
+    header = f"{'Metric':<30}"
+    for name in device_names:
+        header += f"{name:<{col_width}}"
+    print("\n" + header)
+    print("─" * (30 + col_width * len(testers)))
 
-        # Device Info
-        if data.device_type or data.device_id:
-            print("\n📋 Device Info:")
-            if data.device_type:
-                print(f"  Type:       {data.device_type}")
-            if data.device_id:
-                print(f"  ID:         {data.device_id}")
-            if data.mac_address:
-                print(f"  MAC:        {data.mac_address}")
-            if data.firmware_version:
-                print(f"  Firmware:   {data.firmware_version}")
+    # Helper to format row
+    def print_row(label, values, unit=""):
+        row = f"{label:<30}"
+        for val in values:
+            if val is not None:
+                formatted = f"{val}{unit}"
+                row += f"{formatted:<{col_width}}"
+            else:
+                row += f"{'-':<{col_width}}"
+        print(row)
 
-        # Battery Status
-        print("\n🔋 Battery Status:")
-        if data.battery_soc is not None:
-            print(f"  SOC:        {data.battery_soc:.1f}%")
-        if data.battery_soh is not None:
-            print(f"  SOH:        {data.battery_soh:.1f}%")
-        if data.battery_voltage is not None:
-            print(f"  Voltage:    {data.battery_voltage:.2f} V")
-        if data.battery_current is not None:
-            print(f"  Current:    {data.battery_current:.2f} A")
-        # Calculate power from voltage * current
-        if data.battery_voltage is not None and data.battery_current is not None:
-            power = data.battery_voltage * data.battery_current
-            print(f"  Power:      {power:.1f} W")
-        if data.battery_temp is not None:
-            print(f"  Temp:       {data.battery_temp:.1f} °C")
-        if data.design_capacity is not None:
-            print(f"  Capacity:   {data.design_capacity} Wh (design)")
-            # Calculate remaining capacity from SOC
-            if data.battery_soc is not None:
-                remaining = (data.battery_soc / 100.0) * data.design_capacity
-                print(f"              {remaining:.0f} Wh (remaining)")
+    # Device Info section
+    print("\n📋 Device Info:")
+    print_row("  Type", [t.data.device_type for t in testers])
+    print_row("  Firmware", [t.data.firmware_version for t in testers])
 
-        # Cell Voltages
-        if data.cell_voltages and any(v is not None for v in data.cell_voltages):
-            print("\n⚡ Cell Voltages:")
-            for i, voltage in enumerate(data.cell_voltages):
-                if voltage is not None:
-                    print(f"  Cell {i+1:2d}:    {voltage:.3f} V")
+    # Battery Status section
+    print("\n🔋 Battery Status:")
+    print_row("  SOC", [f"{t.data.battery_soc:.1f}%" if t.data.battery_soc is not None else None for t in testers])
+    print_row("  SOH", [f"{t.data.battery_soh:.1f}%" if t.data.battery_soh is not None else None for t in testers])
+    print_row("  Voltage", [f"{t.data.battery_voltage:.2f}V" if t.data.battery_voltage is not None else None for t in testers])
+    print_row("  Current", [f"{t.data.battery_current:.2f}A" if t.data.battery_current is not None else None for t in testers])
 
-        # Runtime Info
-        if data.out1_power is not None or data.temp_high is not None:
-            print("\n⏱️  Runtime Info:")
-            if data.out1_power is not None:
-                print(f"  Output:     {data.out1_power:.1f} W")
-            if data.temp_high is not None:
-                print(f"  Max Temp:   {data.temp_high:.1f} °C")
-            if data.temp_low is not None:
-                print(f"  Min Temp:   {data.temp_low:.1f} °C")
+    # Calculate and show power
+    powers = []
+    for t in testers:
+        if t.data.battery_voltage is not None and t.data.battery_current is not None:
+            powers.append(f"{t.data.battery_voltage * t.data.battery_current:.1f}W")
+        else:
+            powers.append(None)
+    print_row("  Power", powers)
 
-        # Network Status
-        if data.wifi_ssid or data.mqtt_connected is not None:
-            print("\n🌐 Network:")
-            if data.wifi_ssid:
-                print(f"  WiFi:       {data.wifi_ssid}")
-            if data.mqtt_connected is not None:
-                status = "Connected" if data.mqtt_connected else "Disconnected"
-                print(f"  MQTT:       {status}")
-            if data.network_info:
-                print(f"  Network:    {data.network_info}")
+    print_row("  Temperature", [f"{t.data.battery_temp:.1f}°C" if t.data.battery_temp is not None else None for t in testers])
+    print_row("  Design Capacity", [f"{t.data.design_capacity}Wh" if t.data.design_capacity is not None else None for t in testers])
 
-        # System Config
-        if data.config_mode is not None or data.ct_polling_rate is not None:
-            print("\n⚙️  Configuration:")
-            if data.config_mode is not None:
-                print(f"  Config Mode: {data.config_mode}")
-            if data.ct_polling_rate is not None:
-                print(f"  CT Rate:     {data.ct_polling_rate}s")
-            if data.local_api_status is not None:
-                print(f"  Local API:   {data.local_api_status}")
+    # Calculate and show remaining capacity
+    remaining = []
+    for t in testers:
+        if t.data.battery_soc is not None and t.data.design_capacity is not None:
+            rem = (t.data.battery_soc / 100.0) * t.data.design_capacity
+            remaining.append(f"{rem:.0f}Wh")
+        else:
+            remaining.append(None)
+    print_row("  Remaining Capacity", remaining)
 
-    print("\n" + "=" * 100)
+    # Runtime Info section
+    print("\n⏱️  Runtime Info:")
+    print_row("  Output Power", [f"{t.data.out1_power:.1f}W" if t.data.out1_power is not None else None for t in testers])
+    print_row("  Max Temp", [f"{t.data.temp_high:.1f}°C" if t.data.temp_high is not None else None for t in testers])
+    print_row("  Min Temp", [f"{t.data.temp_low:.1f}°C" if t.data.temp_low is not None else None for t in testers])
+
+    # Network Status section
+    print("\n🌐 Network:")
+    print_row("  WiFi SSID", [t.data.wifi_ssid for t in testers])
+    print_row("  MQTT", ["Connected" if t.data.mqtt_connected else "Disconnected" if t.data.mqtt_connected is not None else None for t in testers])
+
+    # Configuration section
+    print("\n⚙️  Configuration:")
+    print_row("  Config Mode", [str(t.data.config_mode) if t.data.config_mode is not None else None for t in testers])
+    print_row("  CT Polling Rate", [f"{t.data.ct_polling_rate}s" if t.data.ct_polling_rate is not None else None for t in testers])
+    print_row("  Local API", [t.data.local_api_status for t in testers])
+
+    # Cell voltages section (show first 8 cells if any)
+    any_cell_voltages = any(t.data.cell_voltages and any(v is not None for v in t.data.cell_voltages) for t in testers)
+    if any_cell_voltages:
+        print("\n⚡ Cell Voltages:")
+        for i in range(8):  # Show first 8 cells
+            cell_values = []
+            for t in testers:
+                if t.data.cell_voltages and len(t.data.cell_voltages) > i and t.data.cell_voltages[i] is not None:
+                    cell_values.append(f"{t.data.cell_voltages[i]:.3f}V")
+                else:
+                    cell_values.append(None)
+            if any(v is not None for v in cell_values):
+                print_row(f"  Cell {i+1}", cell_values)
+
+    print("\n" + "=" * 120)
     print(f"✓ Successfully read data from {len(testers)} device(s) via proxy")
-    print("=" * 100 + "\n")
+    print("=" * 120 + "\n")
 
 
 async def run_stats_mode(devices: list[BLEDevice], iterations: int = 10, parallel: bool = False):
