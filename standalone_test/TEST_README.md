@@ -33,13 +33,15 @@ Test the BLE protocol implementation independently to determine if issues are:
 
 2. **Install Python dependencies:**
    ```bash
-   pip install -r test_requirements.txt
+   python3 -m pip install -r test_requirements.txt
    ```
 
    Or manually:
    ```bash
-   pip install bleak bleak-retry-connector
+   python3 -m pip install bleak bleak-retry-connector
    ```
+
+   **Note:** Use `python3 -m pip` instead of just `pip` to ensure packages are installed to the correct Python interpreter.
 
 3. **Make the script executable (optional):**
    ```bash
@@ -53,7 +55,7 @@ Test the BLE protocol implementation independently to determine if issues are:
 The simplest way - automatically finds and connects to any Marstek device:
 
 ```bash
-python test_marstek_standalone.py
+python3 test_marstek_standalone.py
 ```
 
 ### Connect by Device Address
@@ -61,7 +63,7 @@ python test_marstek_standalone.py
 If you know the BLE MAC address:
 
 ```bash
-python test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
+python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
 ```
 
 ### Connect by Device Name
@@ -69,7 +71,7 @@ python test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
 If you know the device name or prefix:
 
 ```bash
-python test_marstek_standalone.py --name MST_ACCP_1234
+python3 test_marstek_standalone.py --name MST_ACCP_1234
 ```
 
 ### Enable Debug Logging
@@ -77,7 +79,7 @@ python test_marstek_standalone.py --name MST_ACCP_1234
 For troubleshooting BLE communication issues:
 
 ```bash
-python test_marstek_standalone.py --debug
+python3 test_marstek_standalone.py --debug
 ```
 
 ## Output
@@ -145,7 +147,7 @@ If the script can't find your device:
 3. **Disconnect from Home Assistant** - the device can only maintain one connection
 4. **Run with debug logging:**
    ```bash
-   python test_marstek_standalone.py --debug
+   python3 test_marstek_standalone.py --debug
    ```
 5. **List available devices** - the script will show all discovered BLE devices if no Marstek device is found
 
@@ -159,7 +161,7 @@ If discovery works but connection fails:
 4. **Check macOS Bluetooth permissions** - the script needs permission to access Bluetooth
 5. **Try specifying the address directly:**
    ```bash
-   python test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
+   python3 test_marstek_standalone.py --address AA:BB:CC:DD:EE:FF
    ```
 
 ### Partial Data
