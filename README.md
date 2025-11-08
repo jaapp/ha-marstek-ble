@@ -1,5 +1,8 @@
 # Marstek BLE Integration for Home Assistant
 
+> **⚠️ BETA/EXPERIMENTAL RELEASE**
+> This integration is currently in beta and should be considered experimental. While it is functional, you may encounter bugs or unexpected behavior. Please report any issues you find.
+
 Home Assistant integration for Marstek Venus E energy storage systems via Bluetooth Low Energy (BLE).
 
 ## Features
