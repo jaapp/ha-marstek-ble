@@ -429,7 +429,20 @@ class MarstekBLEDevice:
 
             # Get fresh BLE device if callback available
             if self._ble_device_callback:
-                self._ble_device = self._ble_device_callback()
+                refreshed_device = self._ble_device_callback()
+                if refreshed_device is not None:
+                    self._ble_device = refreshed_device
+                else:
+                    _LOGGER.debug(
+                        "%s: ble_device_callback returned None; reusing last known device %s",
+                        self._device_name,
+                        self._ble_device.address if self._ble_device else "unknown",
+                    )
+
+            if self._ble_device is None:
+                raise BleakError(
+                    f"{self._device_name}: No connectable BLE device available to establish connection"
+                )
 
             try:
                 self._client = await establish_connection(
