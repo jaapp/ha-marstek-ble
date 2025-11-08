@@ -185,28 +185,26 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # Update BLE device reference
         self.ble_device = service_info.device
 
-        try:
-            # Fast poll (runs at the configured base interval)
-            await self._poll_fast()
-            self._fast_poll_count += 1
+        # Use persistent device object for polling (SwitchBot pattern)
+        # The device manages its own connection lifecycle
 
-            # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
-            if self._fast_poll_count % self._medium_poll_cycle == 0:
-                await self._poll_medium()
-                self._medium_poll_count += 1
+        # Fast poll (runs at the configured base interval)
+        await self._poll_fast()
+        self._fast_poll_count += 1
 
-            # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
-            if self._fast_poll_count % self._slow_poll_cycle == 0:
-                await self._poll_slow()
-                self._slow_poll_count += 1
+        # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
+        if self._fast_poll_count % self._medium_poll_cycle == 0:
+            await self._poll_medium()
+            self._medium_poll_count += 1
 
-            # Return the current data snapshot so ActiveBluetoothDataUpdateCoordinator
-            # retains the populated MarstekData instance.
-            return self.data
-        finally:
-            # Always drop the BLE connection after a poll cycle so other devices,
-            # especially when routed through a proxy, can obtain a connection slot.
-            await self.device.disconnect()
+        # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
+        if self._fast_poll_count % self._slow_poll_cycle == 0:
+            await self._poll_slow()
+            self._slow_poll_count += 1
+
+        # Return the current data snapshot so ActiveBluetoothDataUpdateCoordinator
+        # retains the populated MarstekData instance.
+        return self.data
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
