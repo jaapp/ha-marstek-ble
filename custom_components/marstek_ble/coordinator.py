@@ -82,8 +82,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._slow_poll_cycle = 1
         self._update_poll_schedule()
         self._poll_lock = asyncio.Lock()
-        self._last_update_ok = False
-        self._consecutive_failures = 0
         self._self_heal_handle: CALLBACK_TYPE | None = None
 
         # Create persistent device object for command sending (SwitchBot pattern)
@@ -181,6 +179,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             self.hass, service_info.device.address, connectable=True
         )
         needs_poll = bool(ble_device)
+        self._set_connected(needs_poll)
 
         _LOGGER.debug(
             "_needs_poll called: ble_device=%s, seconds_since_last_poll=%s, needs_poll=%s",
@@ -312,7 +311,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         """Handle the device going unavailable."""
         super()._async_handle_unavailable(service_info)
         self._was_unavailable = True
-        self._last_update_ok = False
+        self._set_connected(False)
         _LOGGER.info("Device %s is unavailable", self.device_name)
 
     @callback
@@ -326,6 +325,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
                      service_info.device.address, change)
 
         self.ble_device = service_info.device
+        self._set_connected(True)
 
         # Mark device as ready when we receive advertisements
         if not self._ready_event.is_set():
@@ -348,6 +348,17 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         except TimeoutError:
             return False
 
+    def _set_connected(self, connected: bool) -> None:
+        """Record current connectable state."""
+        self._connected = connected
+
+    def _is_connected(self) -> bool:
+        """Best-effort connection signal for watchdog decisions."""
+        device = getattr(self, "device", None)
+        if device and device.is_connected:
+            return True
+        return self._connected
+
     def _cancel_self_heal(self) -> None:
         """Cancel the self-heal watchdog."""
         if self._self_heal_handle:
@@ -367,13 +378,17 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._self_heal_handle = None
         if self.hass.is_stopping:
             return
-        if self._last_update_ok:
+        if self._is_connected():
             self._schedule_self_heal()
             return
         self.hass.async_create_task(self._async_self_heal())
 
     async def _async_self_heal(self) -> None:
         """Force a reconnect/poll attempt after repeated failures."""
+        if self._is_connected():
+            self._schedule_self_heal()
+            return
+
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
@@ -381,6 +396,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             ble_device = self.ble_device
 
         if ble_device is None:
+            self._set_connected(False)
             _LOGGER.debug(
                 "[%s/%s] Self-heal skipped: no connectable device yet",
                 self.device_name,
@@ -425,13 +441,12 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
                     await self._poll_slow()
                     self._slow_poll_count += 1
 
-                self._last_update_ok = True
-                self._consecutive_failures = 0
+                self._set_connected(True)
                 return self.data
 
             except Exception as err:
-                self._last_update_ok = False
-                self._consecutive_failures += 1
+                if isinstance(err, (BleakError, TimeoutError)):
+                    self._set_connected(False)
                 _LOGGER.debug(
                     "[%s/%s] %s poll failed: %s",
                     self.device_name,
