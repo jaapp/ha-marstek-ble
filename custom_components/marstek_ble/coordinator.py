@@ -15,6 +15,8 @@ from homeassistant.components.bluetooth.active_update_coordinator import (
     ActiveBluetoothDataUpdateCoordinator,
 )
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.typing import CALLBACK_TYPE
 
 from .const import (
     CHAR_NOTIFY_UUID,
@@ -79,6 +81,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._medium_poll_cycle = 1
         self._slow_poll_cycle = 1
         self._update_poll_schedule()
+        self._poll_lock = asyncio.Lock()
+        self._last_update_ok = False
+        self._consecutive_failures = 0
+        self._self_heal_handle: CALLBACK_TYPE | None = None
 
         # Create persistent device object for command sending (SwitchBot pattern)
         self.device = MarstekBLEDevice(
@@ -150,6 +156,18 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._medium_poll_count = 0
         self._slow_poll_count = 0
         self._update_poll_schedule()
+        self._schedule_self_heal()
+
+    def async_start(self) -> CALLBACK_TYPE:
+        """Start coordinator listeners and boot the self-heal watchdog."""
+        stop_callback = super().async_start()
+        self._schedule_self_heal()
+
+        def _stop() -> None:
+            stop_callback()
+            self._cancel_self_heal()
+
+        return _stop
 
     @callback
     def _needs_poll(
@@ -183,28 +201,11 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
 
         # Update BLE device reference
-        self.ble_device = service_info.device
-
-        # Use persistent device object for polling (SwitchBot pattern)
-        # The device manages its own connection lifecycle
-
-        # Fast poll (runs at the configured base interval)
-        await self._poll_fast()
-        self._fast_poll_count += 1
-
-        # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
-        if self._fast_poll_count % self._medium_poll_cycle == 0:
-            await self._poll_medium()
-            self._medium_poll_count += 1
-
-        # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
-        if self._fast_poll_count % self._slow_poll_cycle == 0:
-            await self._poll_slow()
-            self._slow_poll_count += 1
-
-        # Return the current data snapshot so ActiveBluetoothDataUpdateCoordinator
-        # retains the populated MarstekData instance.
-        return self.data
+        return await self._async_poll_cycle(
+            ble_device=service_info.device,
+            raise_on_error=True,
+            log_prefix="bluetooth",
+        )
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
@@ -311,6 +312,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         """Handle the device going unavailable."""
         super()._async_handle_unavailable(service_info)
         self._was_unavailable = True
+        self._last_update_ok = False
         _LOGGER.info("Device %s is unavailable", self.device_name)
 
     @callback
@@ -345,3 +347,99 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
                 return True
         except TimeoutError:
             return False
+
+    def _cancel_self_heal(self) -> None:
+        """Cancel the self-heal watchdog."""
+        if self._self_heal_handle:
+            self._self_heal_handle()
+            self._self_heal_handle = None
+
+    def _schedule_self_heal(self) -> None:
+        """Schedule or reschedule the self-heal watchdog."""
+        self._cancel_self_heal()
+        delay = max(self._poll_interval, 30)
+        self._self_heal_handle = async_call_later(
+            self.hass, delay, self._self_heal_callback
+        )
+
+    def _self_heal_callback(self, _now) -> None:
+        """Handle watchdog tick."""
+        self._self_heal_handle = None
+        if self.hass.is_stopping:
+            return
+        if self._last_update_ok:
+            self._schedule_self_heal()
+            return
+        self.hass.async_create_task(self._async_self_heal())
+
+    async def _async_self_heal(self) -> None:
+        """Force a reconnect/poll attempt after repeated failures."""
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.address, connectable=True
+        )
+        if ble_device is None:
+            ble_device = self.ble_device
+
+        if ble_device is None:
+            _LOGGER.debug(
+                "[%s/%s] Self-heal skipped: no connectable device yet",
+                self.device_name,
+                self.address,
+            )
+            self._schedule_self_heal()
+            return
+
+        _LOGGER.info(
+            "[%s/%s] Self-heal triggered - forcing reconnect",
+            self.device_name,
+            self.address,
+        )
+        await self._async_poll_cycle(
+            ble_device=ble_device,
+            raise_on_error=False,
+            log_prefix="self-heal",
+        )
+        self._schedule_self_heal()
+
+    async def _async_poll_cycle(
+        self,
+        *,
+        ble_device: BLEDevice | None,
+        raise_on_error: bool,
+        log_prefix: str,
+    ) -> MarstekData:
+        """Execute one poll cycle with optional error handling."""
+        async with self._poll_lock:
+            if ble_device is not None:
+                self.ble_device = ble_device
+
+            try:
+                await self._poll_fast()
+                self._fast_poll_count += 1
+
+                if self._fast_poll_count % self._medium_poll_cycle == 0:
+                    await self._poll_medium()
+                    self._medium_poll_count += 1
+
+                if self._fast_poll_count % self._slow_poll_cycle == 0:
+                    await self._poll_slow()
+                    self._slow_poll_count += 1
+
+                self._last_update_ok = True
+                self._consecutive_failures = 0
+                return self.data
+
+            except Exception as err:
+                self._last_update_ok = False
+                self._consecutive_failures += 1
+                _LOGGER.debug(
+                    "[%s/%s] %s poll failed: %s",
+                    self.device_name,
+                    self.address,
+                    log_prefix,
+                    err,
+                    exc_info=True,
+                )
+                if raise_on_error:
+                    raise
+                return self.data
