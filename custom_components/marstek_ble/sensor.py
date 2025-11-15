@@ -373,7 +373,7 @@ async def async_setup_entry(
             IntegrationSensor(
                 hass,
                 integration_method=METHOD_TRAPEZOIDAL,
-                name=f"{coordinator.device_name} Battery Energy In",
+                name="Battery Energy In",
                 round_digits=3,
                 source_entity=power_in_entity_id,
                 unique_id=f"{entry.entry_id}_battery_energy_in",
@@ -384,7 +384,7 @@ async def async_setup_entry(
             IntegrationSensor(
                 hass,
                 integration_method=METHOD_TRAPEZOIDAL,
-                name=f"{coordinator.device_name} Battery Energy Out",
+                name="Battery Energy Out",
                 round_digits=3,
                 source_entity=power_out_entity_id,
                 unique_id=f"{entry.entry_id}_battery_energy_out",
