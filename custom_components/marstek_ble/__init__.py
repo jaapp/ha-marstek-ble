@@ -10,17 +10,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import (
-    CONF_POLL_INTERVAL,
-    DEFAULT_POLL_INTERVAL,
-    DOMAIN,
-    TURBO_LOG_MODE,
-)
+from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-if TURBO_LOG_MODE:
-    _LOGGER.setLevel(logging.DEBUG)
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -33,14 +26,7 @@ PLATFORMS: list[Platform] = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Marstek BLE from a config entry."""
-    _LOGGER.info(
-        "Setting up Marstek BLE entry %s for %s (address=%s, poll_interval=%ss, turbo_log=%s)",
-        entry.entry_id,
-        entry.title,
-        entry.data.get(CONF_ADDRESS),
-        entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-        TURBO_LOG_MODE,
-    )
+    _LOGGER.debug("Setting up Marstek BLE entry: %s", entry.data)
 
     address: str = entry.data[CONF_ADDRESS]
     device_name: str = entry.data.get(CONF_NAME, entry.title)
@@ -68,10 +54,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, address.upper(), connectable=True
     )
     if not ble_device:
-        _LOGGER.warning(
-            "Could not find Marstek device with address %s yet; deferring setup",
-            address,
-        )
         raise ConfigEntryNotReady(
             f"Could not find Marstek device with address {address}"
         )
@@ -90,16 +72,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(coordinator.async_start())
     entry.async_on_unload(entry.add_update_listener(_async_handle_entry_update))
 
-    _LOGGER.info("[%s] Waiting for Marstek device advertisements", device_name)
     if not await coordinator.async_wait_ready():
-        _LOGGER.warning(
-            "[%s] No advertisements received yet; coordinator will retry later",
-            device_name,
-        )
         raise ConfigEntryNotReady(
             f"Device {address} not advertising, will retry later"
         )
-    _LOGGER.info("[%s/%s] Device advertisements detected; continuing setup", device_name, address)
 
     # Register device
     device_registry = dr.async_get(hass)
@@ -111,30 +87,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         manufacturer="Marstek",
         model="Venus E",
     )
-    _LOGGER.info(
-        "[%s/%s] Device registry entry ensured",
-        device_name,
-        address,
-    )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    _LOGGER.info(
-        "[%s/%s] Platforms forwarded (%s); Marstek BLE setup complete",
-        device_name,
-        address,
-        ", ".join(platform.value for platform in PLATFORMS),
-    )
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    _LOGGER.info("Unloading Marstek BLE entry %s (%s)", entry.entry_id, entry.title)
+    _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
@@ -155,10 +120,4 @@ async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) ->
         return
 
     poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
-    _LOGGER.info(
-        "[%s/%s] Poll interval updated via options: %ss",
-        coordinator.device_name,
-        coordinator.address,
-        poll_interval,
-    )
     coordinator.set_poll_interval(poll_interval)

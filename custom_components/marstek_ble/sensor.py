@@ -29,36 +29,17 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    CMD_BMS_DATA,
-    CMD_CT_POLLING_RATE,
-    CMD_RUNTIME_INFO,
-    CMD_TIMER_INFO,
-    COMMAND_NAMES,
-    DOMAIN,
-    TURBO_LOG_MODE,
-)
+from .const import DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-TRACE_LEVEL = logging.DEBUG
-
-
-def _command_label(command: int | None) -> str:
-    """Return human readable label for a command."""
-    if command is None:
-        return "n/a"
-    name = COMMAND_NAMES.get(command)
-    if name:
-        return f"{name} (0x{command:02X})"
-    return f"0x{command:02X}"
 
 
 async def async_setup_entry(
@@ -80,7 +61,6 @@ async def async_setup_entry(
             UnitOfElectricPotential.VOLT,
             SensorDeviceClass.VOLTAGE,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_BMS_DATA,
         ),
         MarstekSensor(
             coordinator,
@@ -91,7 +71,6 @@ async def async_setup_entry(
             UnitOfElectricCurrent.AMPERE,
             SensorDeviceClass.CURRENT,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_BMS_DATA,
         ),
         MarstekSensor(
             coordinator,
@@ -102,7 +81,6 @@ async def async_setup_entry(
             PERCENTAGE,
             SensorDeviceClass.BATTERY,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_BMS_DATA,
         ),
         MarstekSensor(
             coordinator,
@@ -113,7 +91,6 @@ async def async_setup_entry(
             PERCENTAGE,
             None,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_BMS_DATA,
         ),
         MarstekSensor(
             coordinator,
@@ -124,7 +101,6 @@ async def async_setup_entry(
             UnitOfTemperature.CELSIUS,
             SensorDeviceClass.TEMPERATURE,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_BMS_DATA,
         ),
         # Power sensors
         MarstekSensor(
@@ -178,7 +154,6 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_RUNTIME_INFO,
         ),
         MarstekSensor(
             coordinator,
@@ -189,7 +164,6 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
-            source_command=CMD_TIMER_INFO,
         ),
         # Energy sensors
         MarstekSensor(
@@ -302,7 +276,6 @@ async def async_setup_entry(
                 SensorDeviceClass.VOLTAGE,
                 SensorStateClass.MEASUREMENT,
                 entity_category=EntityCategory.DIAGNOSTIC,
-                source_command=CMD_BMS_DATA,
             )
         )
 
@@ -531,8 +504,6 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None,
         entity_category: EntityCategory | None = None,
-        *,
-        source_command: int | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -545,8 +516,23 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = state_class
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._source_command = source_command
-        self._last_logged_value = None
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data with telemetry for debugging staleness."""
+        value = self.native_value
+        meta = self.coordinator.data.get_field_metadata(self._key)
+        _LOGGER.debug(
+            "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
+            self.coordinator.device_name,
+            self.coordinator.address,
+            self._key,
+            value,
+            meta.get("command_hex") if meta else "unknown",
+            meta.get("timestamp") if meta else "unknown",
+            meta.get("age_seconds", -1) if meta else -1,
+            meta.get("payload_hex") if meta else "unknown",
+        )
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -557,52 +543,6 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         return self._value_fn(self.coordinator.data)
-
-    def _trace(self, message: str, *args) -> None:
-        """Emit turbo debug logs for sensor updates."""
-        _LOGGER.log(
-            TRACE_LEVEL,
-            "[TRACE][%s/%s][sensor:%s] " + message,
-            self.coordinator.device_name,
-            self.coordinator.address,
-            self._key,
-            *args,
-        )
-
-    def _log_sensor_update(self) -> None:
-        """Log how this entity aligns with recent BLE data."""
-        if self.coordinator.data is None:
-            self._trace("Coordinator data unavailable; skipping value log")
-            return
-
-        value = self._value_fn(self.coordinator.data)
-        command_label = _command_label(self._source_command)
-        age = (
-            self.coordinator.get_command_age(self._source_command)
-            if self._source_command is not None
-            else None
-        )
-        age_text = f"{age:.1f}s" if age is not None else "unknown"
-        wall_time = (
-            self.coordinator.get_command_wall_time(self._source_command)
-            if self._source_command is not None
-            else None
-        )
-        if value != self._last_logged_value or age is None or (age and age > 60):
-            self._last_logged_value = value
-            self._trace(
-                "Value=%s (source=%s, last_cmd=%s, age=%s)",
-                value,
-                command_label,
-                wall_time or "unknown",
-                age_text,
-            )
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from coordinator."""
-        self._log_sensor_update()
-        super()._handle_coordinator_update()
 
     @property
     def device_info(self):
@@ -636,6 +576,23 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         self._value_fn = value_fn
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data with telemetry for debugging staleness."""
+        value = self.native_value
+        meta = self.coordinator.data.get_field_metadata(self._key)
+        _LOGGER.debug(
+            "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
+            self.coordinator.device_name,
+            self.coordinator.address,
+            self._key,
+            value,
+            meta.get("command_hex") if meta else "unknown",
+            meta.get("timestamp") if meta else "unknown",
+            meta.get("age_seconds", -1) if meta else -1,
+            meta.get("payload_hex") if meta else "unknown",
+        )
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:

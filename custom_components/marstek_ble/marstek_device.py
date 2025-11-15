@@ -14,22 +14,11 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
-from .const import CMD_BMS_DATA, COMMAND_NAMES, TURBO_LOG_MODE
-
 _LOGGER = logging.getLogger(__name__)
-TRACE_LEVEL = logging.DEBUG
 
 # BLE UUIDs
 CHAR_WRITE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
 CHAR_NOTIFY_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
-
-
-def _command_label(command: int) -> str:
-    """Return a friendly label for a command byte."""
-    name = COMMAND_NAMES.get(command)
-    if name:
-        return f"{name} (0x{command:02X})"
-    return f"0x{command:02X}"
 
 
 @dataclass
@@ -93,9 +82,57 @@ class MarstekData:
     # Local API status (0x28)
     local_api_status: str | None = None
 
+    # Internal diagnostics
+    field_updates: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+
+    def mark_field_update(
+        self,
+        field: str,
+        command: int,
+        *,
+        timestamp: float | None = None,
+        payload: bytes | None = None,
+    ) -> None:
+        """Record when a field was last updated and by which command."""
+        ts = timestamp or time.time()
+        self.field_updates[field] = {
+            "command": command,
+            "timestamp": ts,
+            "payload_hex": payload.hex() if payload else None,
+        }
+
+    def get_field_metadata(self, field: str) -> dict[str, Any] | None:
+        """Return metadata for a field including age in seconds."""
+        entry = self.field_updates.get(field)
+        if not entry:
+            return None
+
+        timestamp = entry.get("timestamp")
+        age = time.time() - timestamp if timestamp else None
+        return {
+            "command": entry.get("command"),
+            "command_hex": f"0x{entry['command']:02X}" if entry.get("command") is not None else None,
+            "timestamp": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+            if timestamp
+            else None,
+            "age_seconds": age,
+            "payload_hex": entry.get("payload_hex"),
+        }
+
 
 class MarstekProtocol:
     """Marstek BLE protocol handler."""
+
+    @staticmethod
+    def _track_field(
+        device_data: MarstekData,
+        field: str,
+        command: int,
+        timestamp: float,
+        payload: bytes | None = None,
+    ) -> None:
+        """Mark a field as updated by a specific command."""
+        device_data.mark_field_update(field, command, timestamp=timestamp, payload=payload)
 
     @staticmethod
     def build_command(cmd: int, payload: bytes = b"") -> bytes:
@@ -140,32 +177,33 @@ class MarstekProtocol:
         cmd = data[3]
         payload = data[4:-1]  # Exclude header and checksum
         payload_len = len(payload)
+        timestamp = time.time()
 
         _LOGGER.debug("Parsing cmd 0x%02X, payload length %d", cmd, payload_len)
 
         try:
             if cmd == 0x03:  # Runtime info
-                return MarstekProtocol._parse_runtime_info(payload, device_data)
+                return MarstekProtocol._parse_runtime_info(payload, device_data, timestamp)
             elif cmd == 0x04:  # Device info
-                return MarstekProtocol._parse_device_info(payload, device_data)
+                return MarstekProtocol._parse_device_info(payload, device_data, timestamp)
             elif cmd == 0x08:  # WiFi SSID
-                return MarstekProtocol._parse_wifi_ssid(payload, device_data)
+                return MarstekProtocol._parse_wifi_ssid(payload, device_data, timestamp)
             elif cmd == 0x0D:  # System data
-                return MarstekProtocol._parse_system_data(payload, device_data)
+                return MarstekProtocol._parse_system_data(payload, device_data, timestamp)
             elif cmd == 0x13:  # Timer info
-                return MarstekProtocol._parse_timer_info(payload, device_data)
+                return MarstekProtocol._parse_timer_info(payload, device_data, timestamp)
             elif cmd == 0x14:  # BMS data
-                return MarstekProtocol._parse_bms_data(payload, device_data)
+                return MarstekProtocol._parse_bms_data(payload, device_data, timestamp)
             elif cmd == 0x1A:  # Config data
-                return MarstekProtocol._parse_config_data(payload, device_data)
+                return MarstekProtocol._parse_config_data(payload, device_data, timestamp)
             elif cmd == 0x21:  # Meter IP
-                return MarstekProtocol._parse_meter_ip(payload, device_data)
+                return MarstekProtocol._parse_meter_ip(payload, device_data, timestamp)
             elif cmd == 0x22:  # CT polling rate
-                return MarstekProtocol._parse_ct_polling_rate(payload, device_data)
+                return MarstekProtocol._parse_ct_polling_rate(payload, device_data, timestamp)
             elif cmd == 0x24:  # Network info
-                return MarstekProtocol._parse_network_info(payload, device_data)
+                return MarstekProtocol._parse_network_info(payload, device_data, timestamp)
             elif cmd == 0x28:  # Local API status
-                return MarstekProtocol._parse_local_api_status(payload, device_data)
+                return MarstekProtocol._parse_local_api_status(payload, device_data, timestamp)
             else:
                 _LOGGER.debug("Unhandled cmd 0x%02X", cmd)
                 return False
@@ -175,7 +213,9 @@ class MarstekProtocol:
             return False
 
     @staticmethod
-    def _parse_runtime_info(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_runtime_info(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse runtime info (0x03)."""
         # Support both long format (109 bytes) and short format (37 bytes)
         if len(payload) < 37:
@@ -192,12 +232,27 @@ class MarstekProtocol:
                 if len(payload) >= 16:
                     device_data.wifi_connected = (payload[15] & 0x01) != 0
                     device_data.mqtt_connected = (payload[15] & 0x02) != 0
+                    MarstekProtocol._track_field(
+                        device_data, "wifi_connected", 0x03, timestamp, payload
+                    )
+                    MarstekProtocol._track_field(
+                        device_data, "mqtt_connected", 0x03, timestamp, payload
+                    )
                 if len(payload) >= 17:
                     device_data.out1_active = payload[16] != 0
+                    MarstekProtocol._track_field(
+                        device_data, "out1_active", 0x03, timestamp, payload
+                    )
                 if len(payload) >= 22:
                     device_data.out1_power = float(struct.unpack("<H", payload[20:22])[0])
+                    MarstekProtocol._track_field(
+                        device_data, "out1_power", 0x03, timestamp, payload
+                    )
                 if len(payload) >= 29:
                     device_data.extern1_connected = payload[28] != 0
+                    MarstekProtocol._track_field(
+                        device_data, "extern1_connected", 0x03, timestamp, payload
+                    )
                 return True
             except Exception as e:
                 _LOGGER.warning("Error parsing short runtime info: %s", e)
@@ -212,10 +267,35 @@ class MarstekProtocol:
         device_data.out1_active = payload[16] != 0
         device_data.extern1_connected = payload[28] != 0
 
+        for field in (
+            "out1_power",
+            "temp_low",
+            "temp_high",
+            "wifi_connected",
+            "mqtt_connected",
+            "out1_active",
+            "extern1_connected",
+        ):
+            MarstekProtocol._track_field(
+                device_data, field, 0x03, timestamp, payload
+            )
+
+        _LOGGER.debug(
+            "Runtime data parsed (cmd=0x03): power=%sW wifi=%s mqtt=%s out1_active=%s temp_low/high=%s/%s",
+            device_data.out1_power,
+            device_data.wifi_connected,
+            device_data.mqtt_connected,
+            device_data.out1_active,
+            device_data.temp_low,
+            device_data.temp_high,
+        )
+
         return True
 
     @staticmethod
-    def _parse_device_info(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_device_info(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse device info (0x04) - ASCII key=value pairs."""
         try:
             info_str = payload.decode("ascii", errors="ignore")
@@ -238,22 +318,35 @@ class MarstekProtocol:
                 elif key in ("dev_ver", "fc_ver"):
                     device_data.firmware_version = value
 
+            for field in ("device_type", "device_id", "mac_address", "firmware_version"):
+                if getattr(device_data, field) is not None:
+                    MarstekProtocol._track_field(
+                        device_data, field, 0x04, timestamp, payload
+                    )
+
             return True
         except Exception as e:
             _LOGGER.exception("Error parsing device info: %s", e)
             return False
 
     @staticmethod
-    def _parse_wifi_ssid(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_wifi_ssid(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse WiFi SSID (0x08)."""
         try:
             device_data.wifi_ssid = payload.decode("ascii", errors="ignore").strip()
+            MarstekProtocol._track_field(
+                device_data, "wifi_ssid", 0x08, timestamp, payload
+            )
             return True
         except Exception:
             return False
 
     @staticmethod
-    def _parse_system_data(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_system_data(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse system data (0x0D)."""
         if len(payload) < 11:
             return False
@@ -265,10 +358,24 @@ class MarstekProtocol:
         device_data.system_value_4 = struct.unpack("<H", payload[7:9])[0]
         device_data.system_value_5 = struct.unpack("<H", payload[9:11])[0]
 
+        for field in (
+            "system_status",
+            "system_value_1",
+            "system_value_2",
+            "system_value_3",
+            "system_value_4",
+            "system_value_5",
+        ):
+            MarstekProtocol._track_field(
+                device_data, field, 0x0D, timestamp, payload
+            )
+
         return True
 
     @staticmethod
-    def _parse_timer_info(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_timer_info(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse timer info (0x13)."""
         if len(payload) < 45:
             return False
@@ -277,10 +384,21 @@ class MarstekProtocol:
         device_data.smart_meter_connected = payload[37] != 0
         device_data.adaptive_power_out = float(struct.unpack("<H", payload[38:40])[0])
 
+        for field in (
+            "adaptive_mode_enabled",
+            "smart_meter_connected",
+            "adaptive_power_out",
+        ):
+            MarstekProtocol._track_field(
+                device_data, field, 0x13, timestamp, payload
+            )
+
         return True
 
     @staticmethod
-    def _parse_bms_data(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_bms_data(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse BMS data (0x14)."""
         if len(payload) < 80:
             return False
@@ -298,11 +416,43 @@ class MarstekProtocol:
             if offset + 1 < len(payload):
                 cell_voltage = struct.unpack("<H", payload[offset:offset + 2])[0] / 1000.0
                 device_data.cell_voltages[i] = cell_voltage
+                MarstekProtocol._track_field(
+                    device_data, f"cell_{i + 1}_voltage", 0x14, timestamp, payload
+                )
+
+        for field in (
+            "battery_soc",
+            "battery_soh",
+            "design_capacity",
+            "battery_voltage",
+            "battery_current",
+            "battery_temp",
+        ):
+            MarstekProtocol._track_field(
+                device_data, field, 0x14, timestamp, payload
+            )
+
+        cells = [v for v in device_data.cell_voltages if v is not None]
+        cell_min = min(cells) if cells else None
+        cell_max = max(cells) if cells else None
+        cell_avg = sum(cells) / len(cells) if cells else None
+        _LOGGER.debug(
+            "BMS parsed (cmd=0x14): V=%sV I=%sA SOC=%s%% SOH=%s%% cells(min/max/avg)=%s/%s/%s",
+            device_data.battery_voltage,
+            device_data.battery_current,
+            device_data.battery_soc,
+            device_data.battery_soh,
+            cell_min,
+            cell_max,
+            cell_avg,
+        )
 
         return True
 
     @staticmethod
-    def _parse_config_data(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_config_data(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse config data (0x1A)."""
         if len(payload) < 17:
             return False
@@ -311,10 +461,17 @@ class MarstekProtocol:
         device_data.config_status = struct.unpack("<b", payload[4:5])[0]
         device_data.config_value = payload[16]
 
+        for field in ("config_mode", "config_status", "config_value"):
+            MarstekProtocol._track_field(
+                device_data, field, 0x1A, timestamp, payload
+            )
+
         return True
 
     @staticmethod
-    def _parse_meter_ip(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_meter_ip(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse meter IP (0x21)."""
         try:
             # Check if all 0xFF (not set)
@@ -323,30 +480,46 @@ class MarstekProtocol:
             else:
                 device_data.meter_ip = payload.decode("ascii", errors="ignore").strip("\x00")
 
+            MarstekProtocol._track_field(
+                device_data, "meter_ip", 0x21, timestamp, payload
+            )
+
             return True
         except Exception:
             return False
 
     @staticmethod
-    def _parse_ct_polling_rate(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_ct_polling_rate(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse CT polling rate (0x22)."""
         if len(payload) < 1:
             return False
 
         device_data.ct_polling_rate = int(payload[0])
+        MarstekProtocol._track_field(
+            device_data, "ct_polling_rate", 0x22, timestamp, payload
+        )
         return True
 
     @staticmethod
-    def _parse_network_info(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_network_info(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse network info (0x24)."""
         try:
             device_data.network_info = payload.decode("ascii", errors="ignore").strip()
+            MarstekProtocol._track_field(
+                device_data, "network_info", 0x24, timestamp, payload
+            )
             return True
         except Exception:
             return False
 
     @staticmethod
-    def _parse_local_api_status(payload: bytes, device_data: MarstekData) -> bool:
+    def _parse_local_api_status(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
         """Parse local API status (0x28)."""
         if len(payload) < 3:
             return False
@@ -354,6 +527,10 @@ class MarstekProtocol:
         enabled = "enabled" if payload[0] == 1 else "disabled"
         port = struct.unpack("<H", payload[1:3])[0]
         device_data.local_api_status = f"{enabled}/{port}"
+
+        MarstekProtocol._track_field(
+            device_data, "local_api_status", 0x28, timestamp, payload
+        )
 
         return True
 
@@ -409,16 +586,12 @@ class MarstekBLEDevice:
         self._total_commands_sent = 0
         self._total_commands_success = 0
         self._total_commands_failure = 0
+        self._last_command_time: float | None = None
         self._last_command_error: str | None = None
         # Response waiting mechanism (like Venus Monitor)
         self._pending_command: int | None = None
         self._response_event: asyncio.Event | None = None
         self._response_data: bytes | None = None
-        self._trace(
-            "BLE device wrapper initialized (initial_address=%s, notifications_callback=%s)",
-            self._ble_device.address if self._ble_device else "unknown",
-            self._notification_callback is not None,
-        )
 
     @property
     def name(self) -> str:
@@ -430,56 +603,32 @@ class MarstekBLEDevice:
         """Return the device address."""
         return self._ble_device.address
 
-    def _trace(self, message: str, *args, level: int = TRACE_LEVEL) -> None:
-        """Emit a turbo-trace log entry."""
-        address = getattr(self._ble_device, "address", "unknown") if self._ble_device else "unknown"
-        _LOGGER.log(
-            level,
-            "[TRACE][%s/%s] " + message,
-            self._device_name,
-            address,
-            *args,
-        )
-
     async def _ensure_connected(self) -> None:
         """Ensure we have an active BLE connection."""
         if self._client and self._client.is_connected:
             _LOGGER.debug("%s: Already connected", self._device_name)
-            self._trace("Connection already active")
             return
 
         async with self._connect_lock:
             # Double-check after acquiring lock
             if self._client and self._client.is_connected:
-                self._trace("Connection became active while waiting for lock")
                 return
 
             _LOGGER.debug("%s: Establishing connection", self._device_name)
-            self._trace("Establishing BLE connection")
 
             # Get fresh BLE device if callback available
             if self._ble_device_callback:
                 refreshed_device = self._ble_device_callback()
                 if refreshed_device is not None:
                     self._ble_device = refreshed_device
-                    self._trace(
-                        "BLE device refreshed before connect (address=%s)",
-                        self._ble_device.address,
-                    )
                 else:
                     _LOGGER.debug(
                         "%s: ble_device_callback returned None; reusing last known device %s",
                         self._device_name,
                         self._ble_device.address if self._ble_device else "unknown",
                     )
-                    self._trace(
-                        "BLE device callback returned None; reusing last known device %s",
-                        self._ble_device.address if self._ble_device else "unknown",
-                        level=logging.WARNING,
-                    )
 
             if self._ble_device is None:
-                self._trace("Cannot connect because no BLE device is available", level=logging.ERROR)
                 raise BleakError(
                     f"{self._device_name}: No connectable BLE device available to establish connection"
                 )
@@ -494,7 +643,6 @@ class MarstekBLEDevice:
                     ble_device_callback=self._ble_device_callback,
                 )
                 _LOGGER.debug("%s: Connected successfully", self._device_name)
-                self._trace("BLE connection established successfully")
 
                 # Start notifications if callback provided
                 if self._notification_callback and not self._notifications_started:
@@ -504,10 +652,6 @@ class MarstekBLEDevice:
                     )
                     self._notifications_started = True
                     _LOGGER.debug("%s: Notifications started successfully", self._device_name)
-                    self._trace(
-                        "Notifications started on characteristic %s",
-                        CHAR_NOTIFY_UUID,
-                    )
                 else:
                     _LOGGER.debug(
                         "%s: Notifications already started or no callback (callback=%s, started=%s)",
@@ -515,20 +659,10 @@ class MarstekBLEDevice:
                         self._notification_callback is not None,
                         self._notifications_started,
                     )
-                    self._trace(
-                        "Notifications start skipped (callback=%s started=%s)",
-                        self._notification_callback is not None,
-                        self._notifications_started,
-                    )
 
             except (BleakError, TimeoutError) as ex:
                 _LOGGER.warning(
                     "%s: Failed to connect: %s", self._device_name, ex
-                )
-                self._trace(
-                    "Failed to connect: %s",
-                    ex,
-                    level=logging.ERROR,
                 )
                 raise
 
@@ -539,11 +673,6 @@ class MarstekBLEDevice:
             self._expected_disconnect = False
         else:
             _LOGGER.warning("%s: Unexpected disconnect", self._device_name)
-        self._trace(
-            "Disconnected from BLE client (expected=%s)",
-            self._expected_disconnect,
-            level=logging.WARNING if not self._expected_disconnect else TRACE_LEVEL,
-        )
         self._client = None
         self._notifications_started = False
 
@@ -557,24 +686,32 @@ class MarstekBLEDevice:
         self._disconnect_timer = loop.call_later(
             30.0, lambda: asyncio.create_task(self._execute_disconnect())
         )
-        self._trace("Disconnect timer scheduled for 30s of inactivity")
+        _LOGGER.debug(
+            "%s: Scheduled inactivity disconnect in 30s (last_command_age=%.1fs)",
+            self._device_name,
+            time.time() - self._last_command_time if self._last_command_time else -1,
+        )
 
     async def _execute_disconnect(self) -> None:
         """Execute disconnection."""
         async with self._connect_lock:
             if self._client and self._client.is_connected:
-                _LOGGER.debug("%s: Disconnecting due to inactivity", self._device_name)
+                last_age = (
+                    time.time() - self._last_command_time
+                    if self._last_command_time
+                    else None
+                )
+                _LOGGER.debug(
+                    "%s: Disconnecting due to inactivity (last_command_age=%s)",
+                    self._device_name,
+                    f"{last_age:.1f}s" if last_age is not None else "unknown",
+                )
                 self._expected_disconnect = True
                 await self._client.disconnect()
-                self._trace("Disconnected due to inactivity timeout")
             self._disconnect_timer = None
 
     async def send_command(
-        self,
-        cmd: int,
-        payload: bytes = b"",
-        retry: int = 3,
-        timeout: float | None = 5.0,
+        self, cmd: int, payload: bytes = b"", retry: int = 3
     ) -> bool:
         """Send a command to the device.
 
@@ -589,22 +726,13 @@ class MarstekBLEDevice:
         command_data = MarstekProtocol.build_command(cmd, payload)
         attempts_made = 0
         last_error: str | None = None
-        label = _command_label(cmd)
-        payload_hex = payload.hex() if payload else "<empty>"
-        frame_hex = command_data.hex()
 
         async with self._operation_lock:
             for attempt in range(retry):
                 attempts_made = attempt + 1
+                start_time = time.monotonic()
+                wall_time = time.time()
                 try:
-                    self._trace(
-                        "TX %s attempt %d/%d payload=%s frame=%s",
-                        label,
-                        attempt + 1,
-                        retry,
-                        payload_hex,
-                        frame_hex,
-                    )
                     await self._ensure_connected()
 
                     # Setup response waiting (Venus Monitor pattern)
@@ -622,34 +750,31 @@ class MarstekBLEDevice:
                     )
 
                     await self._client.write_gatt_char(CHAR_WRITE_UUID, command_data)
-                    self._trace(
-                        "TX %s dispatched; awaiting response (timeout=%ss)",
-                        label,
-                        timeout,
+                    self._last_command_time = wall_time
+                    _LOGGER.debug(
+                        "%s TX (addr=%s handle=%s) cmd=0x%02X payload=%s",
+                        self._device_name,
+                        self.address,
+                        CHAR_WRITE_UUID,
+                        cmd,
+                        payload.hex(),
                     )
 
                     self._reset_disconnect_timer()
 
-                    # Wait for response
+                    # Wait for response (timeout 2000ms like Venus Monitor)
                     try:
-                        await asyncio.wait_for(self._response_event.wait(), timeout=timeout)
+                        await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
                         _LOGGER.debug(
                             "%s: Command 0x%02X sent and response received",
                             self._device_name,
                             cmd
                         )
-                        self._trace("Response received for %s", label)
                     except asyncio.TimeoutError:
                         _LOGGER.warning(
                             "%s: Timeout waiting for response to command 0x%02X",
                             self._device_name,
                             cmd
-                        )
-                        self._trace(
-                            "Timeout waiting for response to %s after %ss",
-                            label,
-                            timeout,
-                            level=logging.WARNING,
                         )
                         # Continue anyway - device might not respond to some commands
                     finally:
@@ -657,6 +782,7 @@ class MarstekBLEDevice:
                         self._pending_command = None
                         self._response_event = None
 
+                    duration = time.monotonic() - start_time
                     self._record_command_result(
                         cmd=cmd,
                         frame=command_data,
@@ -664,30 +790,26 @@ class MarstekBLEDevice:
                         success=True,
                         error=None,
                     )
-                    self._trace(
-                        "TX %s succeeded after %d attempt(s)",
-                        label,
+                    _LOGGER.debug(
+                        "%s: Command 0x%02X succeeded in %.3fs after %d attempt(s)",
+                        self._device_name,
+                        cmd,
+                        duration,
                         attempts_made,
                     )
                     return True
 
                 except (BleakError, TimeoutError) as ex:
                     last_error = str(ex)
+                    duration = time.monotonic() - start_time
                     _LOGGER.warning(
-                        "%s: Failed to send command 0x%02X (attempt %d/%d): %s",
+                        "%s: Failed to send command 0x%02X (attempt %d/%d, %.3fs): %s",
                         self._device_name,
                         cmd,
                         attempt + 1,
                         retry,
+                        duration,
                         ex,
-                    )
-                    self._trace(
-                        "TX %s failed on attempt %d/%d due to %s",
-                        label,
-                        attempt + 1,
-                        retry,
-                        ex,
-                        level=logging.ERROR,
                     )
                     # Force reconnect on next attempt
                     if self._client:
@@ -707,13 +829,6 @@ class MarstekBLEDevice:
                 cmd,
                 retry,
             )
-            self._trace(
-                "TX %s failed after %d attempts (last_error=%s)",
-                label,
-                retry,
-                last_error,
-                level=logging.ERROR,
-            )
             self._record_command_result(
                 cmd=cmd,
                 frame=command_data,
@@ -725,7 +840,6 @@ class MarstekBLEDevice:
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
-        self._trace("Manual disconnect requested")
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
             self._disconnect_timer = None
@@ -746,7 +860,6 @@ class MarstekBLEDevice:
                 self._expected_disconnect = True
                 await self._client.disconnect()
             self._client = None
-        self._trace("Disconnect routine completed")
 
     @property
     def is_connected(self) -> bool:
@@ -801,16 +914,6 @@ class MarstekBLEDevice:
         timestamp = time.time()
         command = data[3] if len(data) > 3 else None
         payload = data[4:-1] if len(data) > 5 else b""
-        label = _command_label(command) if command is not None else "unknown"
-        self._trace(
-            "RX %s from sender %s len=%s parsed=%s payload=%s frame=%s",
-            label,
-            sender,
-            len(data),
-            parsed,
-            payload.hex() if payload else "<empty>",
-            data.hex(),
-        )
 
         entry = {
             "timestamp": timestamp,
@@ -823,38 +926,32 @@ class MarstekBLEDevice:
         self._notification_history.append(entry)
 
         if command is not None:
+            _LOGGER.debug(
+                "%s RX (addr=%s sender=%s) cmd=0x%02X payload=%s parsed=%s",
+                self._device_name,
+                self.address,
+                sender,
+                command,
+                payload.hex(),
+                parsed,
+            )
             stats = self._command_stats[command]
             stats["last_notification"] = timestamp
             stats["last_notification_hex"] = data.hex()
 
             # Signal response received if waiting (Venus Monitor pattern)
             if self._pending_command == command and self._response_event:
-                _LOGGER.debug(
-                    "%s: Received response for command 0x%02X (%d bytes)",
-                    self._device_name,
-                    command,
-                    len(data)
-                )
                 self._response_data = data
                 self._response_event.set()
-                self._trace(
-                    "Response event fulfilled by %s (%d bytes)",
-                    label,
-                    len(data),
-                )
-
-            if command == CMD_BMS_DATA:
-                _LOGGER.debug(
-                    "%s: BMS notification details (len=%d, parsed=%s)",
-                    self._device_name,
-                    len(data),
-                    parsed,
-                )
-                self._trace(
-                    "BMS notification parsed=%s len=%d",
-                    parsed,
-                    len(data),
-                )
+        else:
+            _LOGGER.debug(
+                "%s RX (addr=%s sender=%s) cmd=unknown frame=%s parsed=%s",
+                self._device_name,
+                self.address,
+                sender,
+                data.hex(),
+                parsed,
+            )
 
     @staticmethod
     def _iso_timestamp(timestamp: float | None) -> str | None:
