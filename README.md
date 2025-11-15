@@ -97,6 +97,15 @@ Entity IDs use your device slug—replace `<device>` with your device name (e.g.
 | `sensor.<device>_mac_address` | (unknown) | slow (~300) |
 | `sensor.<device>_firmware_version` | (unknown) | slow (~300) |
 
+### Energy dashboard sensors
+
+The integration also exposes four helper sensors you can add directly to the Home Assistant Energy Dashboard:
+
+- `Battery Energy In`
+- `Battery Energy Out`
+- `Daily Battery Energy In`
+- `Daily Battery Energy Out`
+
 ## Supported Devices
 
 - Marstek Venus E hardware v2 (`MST_ACCP_*` - tested)
