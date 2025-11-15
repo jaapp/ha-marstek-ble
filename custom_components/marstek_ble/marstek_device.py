@@ -15,6 +15,12 @@ from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 _LOGGER = logging.getLogger(__name__)
+VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+VERBOSE_LOGGER.propagate = False
+VERBOSE_LOGGER.setLevel(logging.INFO)
+DEVICE_DEBUG = logging.getLogger(f"{__name__}.device")
+DEVICE_DEBUG.propagate = False
+DEVICE_DEBUG.setLevel(logging.INFO)
 
 # BLE UUIDs
 CHAR_WRITE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
@@ -741,18 +747,17 @@ class MarstekBLEDevice:
                     self._response_event = asyncio.Event()
                     self._response_data = None
 
-                    _LOGGER.debug(
-                        "%s: Sending command 0x%02X (attempt %d/%d): %s",
+                    DEVICE_DEBUG.debug(
+                        "%s: Sending command 0x%02X (attempt %d/%d)",
                         self._device_name,
                         cmd,
                         attempt + 1,
                         retry,
-                        command_data.hex(),
                     )
 
                     await self._client.write_gatt_char(CHAR_WRITE_UUID, command_data)
                     self._last_command_time = wall_time
-                    _LOGGER.debug(
+                    VERBOSE_LOGGER.debug(
                         "%s TX (addr=%s handle=%s) cmd=0x%02X payload=%s",
                         self._device_name,
                         self.address,
@@ -929,7 +934,7 @@ class MarstekBLEDevice:
         self._notification_history.append(entry)
 
         if command is not None:
-            _LOGGER.debug(
+            VERBOSE_LOGGER.debug(
                 "%s RX (addr=%s sender=%s) cmd=0x%02X payload=%s parsed=%s",
                 self._device_name,
                 self.address,
@@ -947,7 +952,7 @@ class MarstekBLEDevice:
                 self._response_data = data
                 self._response_event.set()
         else:
-            _LOGGER.debug(
+            VERBOSE_LOGGER.debug(
                 "%s RX (addr=%s sender=%s) cmd=unknown frame=%s parsed=%s",
                 self._device_name,
                 self.address,

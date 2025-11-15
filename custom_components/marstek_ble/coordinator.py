@@ -46,6 +46,9 @@ from .const import (
 from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
 _LOGGER = logging.getLogger(__name__)
+VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+VERBOSE_LOGGER.propagate = False
+VERBOSE_LOGGER.setLevel(logging.INFO)
 
 
 class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
@@ -392,7 +395,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         """Handle notification from device."""
         raw_data = bytes(data)
         cmd = raw_data[3] if len(raw_data) > 3 else None
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Received notification cmd=%s from sender %s: %s",
             self.device_name,
             self.address,

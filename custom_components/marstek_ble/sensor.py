@@ -40,6 +40,9 @@ from .const import DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+VERBOSE_LOGGER.propagate = False
+VERBOSE_LOGGER.setLevel(logging.INFO)
 
 
 async def async_setup_entry(
@@ -526,7 +529,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         """Handle updated data with telemetry for debugging staleness."""
         value = self.native_value
         meta = self.coordinator.data.get_field_metadata(self._key)
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
             self.coordinator.device_name,
             self.coordinator.address,
@@ -586,7 +589,7 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         """Handle updated data with telemetry for debugging staleness."""
         value = self.native_value
         meta = self.coordinator.data.get_field_metadata(self._key)
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
             self.coordinator.device_name,
             self.coordinator.address,
