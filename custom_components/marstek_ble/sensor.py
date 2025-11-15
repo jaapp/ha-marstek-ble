@@ -359,166 +359,90 @@ async def async_setup_entry(
 
     async def _async_setup_energy_helpers() -> None:
         """Create integration and daily utility meter sensors once base sensors are registered."""
-        try:
-            entity_registry = er.async_get(hass)
+        entity_registry = er.async_get(hass)
 
-            def _resolve_entity_id(key: str) -> str | None:
-                return entity_registry.async_get_entity_id(
-                    "sensor", DOMAIN, f"{entry.entry_id}_{key}"
-                )
-
-            _LOGGER.debug(
-                "Energy helper starting for %s (entry_id=%s)",
-                coordinator.device_name,
-                entry.entry_id,
+        def _resolve_entity_id(key: str) -> str | None:
+            return entity_registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{entry.entry_id}_{key}"
             )
 
-            max_attempts = 6
-            delay = 5
+        power_in_entity_id = _resolve_entity_id("battery_power_in") or f"sensor.{slugify(coordinator.device_name)}_battery_power_in"
+        power_out_entity_id = _resolve_entity_id("battery_power_out") or f"sensor.{slugify(coordinator.device_name)}_battery_power_out"
 
-            power_in_entity_id: str | None = None
-            power_out_entity_id: str | None = None
+        energy_entities: list[IntegrationSensor] = [
+            IntegrationSensor(
+                hass,
+                integration_method=METHOD_TRAPEZOIDAL,
+                name=f"{coordinator.device_name} Battery Energy In",
+                round_digits=3,
+                source_entity=power_in_entity_id,
+                unique_id=f"{entry.entry_id}_battery_energy_in",
+                unit_prefix=None,
+                unit_time=UnitOfTime.HOURS,
+                max_sub_interval=None,
+            ),
+            IntegrationSensor(
+                hass,
+                integration_method=METHOD_TRAPEZOIDAL,
+                name=f"{coordinator.device_name} Battery Energy Out",
+                round_digits=3,
+                source_entity=power_out_entity_id,
+                unique_id=f"{entry.entry_id}_battery_energy_out",
+                unit_prefix=None,
+                unit_time=UnitOfTime.HOURS,
+                max_sub_interval=None,
+            ),
+        ]
 
-            for attempt in range(1, max_attempts + 1):
-                await hass.async_block_till_done()
-                power_in_entity_id = _resolve_entity_id("battery_power_in")
-                power_out_entity_id = _resolve_entity_id("battery_power_out")
+        async_add_entities(energy_entities)
+        await hass.async_block_till_done()
 
-                _LOGGER.debug(
-                    "Energy helper attempt %s/%s for %s: in=%s out=%s",
-                    attempt,
-                    max_attempts,
-                    coordinator.device_name,
-                    power_in_entity_id,
-                    power_out_entity_id,
+        energy_in_entity_id = _resolve_entity_id("battery_energy_in")
+        energy_out_entity_id = _resolve_entity_id("battery_energy_out")
+
+        utility_entities: list[UtilityMeterSensor] = []
+        utility_data = hass.data.setdefault(DATA_UTILITY, {})
+
+        for slug, source_entity_id, name in [
+            ("daily_battery_energy_in", energy_in_entity_id, f"{coordinator.device_name} Daily Battery Energy In"),
+            ("daily_battery_energy_out", energy_out_entity_id, f"{coordinator.device_name} Daily Battery Energy Out"),
+        ]:
+            if not source_entity_id:
+                _LOGGER.warning(
+                    "Unable to resolve integration sensor entity for %s; skipping %s",
+                    slug,
+                    name,
                 )
+                continue
 
-                if power_in_entity_id and power_out_entity_id:
-                    break
+            parent_meter = f"{entry.entry_id}_{slug}_utility"
+            utility_data[parent_meter] = {
+                DATA_TARIFF_SENSORS: [],
+                CONF_TARIFF_ENTITY: None,
+            }
 
-                if attempt < max_attempts:
-                    await asyncio.sleep(delay)
-                else:
-                    _LOGGER.warning(
-                        "Energy helper setup failed to resolve power entities for %s; giving up",
-                        coordinator.device_name,
-                    )
-                    return
-
-            # Fallback: if still missing (edge case), construct expected entity_ids from slugified device name
-            if not power_in_entity_id:
-                power_in_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_in"
-            if not power_out_entity_id:
-                power_out_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_out"
-
-            _LOGGER.debug(
-                "Energy helper resolved power entities for %s: in=%s out=%s",
-                coordinator.device_name,
-                power_in_entity_id,
-                power_out_entity_id,
+            meter = UtilityMeterSensor(
+                hass,
+                cron_pattern=None,
+                delta_values=False,
+                meter_offset=timedelta(0),
+                meter_type=DAILY,
+                name=name,
+                net_consumption=False,
+                parent_meter=parent_meter,
+                periodically_resetting=False,
+                source_entity=source_entity_id,
+                tariff_entity=None,
+                tariff=None,
+                unique_id=f"{entry.entry_id}_{slug}",
+                sensor_always_available=False,
             )
 
-            energy_entities: list[IntegrationSensor] = []
+            utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
+            utility_entities.append(meter)
 
-            energy_entities.append(
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy In",
-                    round_digits=3,
-                    source_entity=power_in_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_in",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                )
-            )
-
-            energy_entities.append(
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy Out",
-                    round_digits=3,
-                    source_entity=power_out_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_out",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                )
-            )
-
-            async_add_entities(energy_entities)
-            await hass.async_block_till_done()
-
-            energy_in_entity_id = _resolve_entity_id("battery_energy_in")
-            energy_out_entity_id = _resolve_entity_id("battery_energy_out")
-
-            utility_entities: list[UtilityMeterSensor] = []
-            utility_data = hass.data.setdefault(DATA_UTILITY, {})
-
-            utility_specs: list[tuple[str, str | None, str]] = [
-                (
-                    "daily_battery_energy_in",
-                    energy_in_entity_id,
-                    f"{coordinator.device_name} Daily Battery Energy In",
-                ),
-                (
-                    "daily_battery_energy_out",
-                    energy_out_entity_id,
-                    f"{coordinator.device_name} Daily Battery Energy Out",
-                ),
-            ]
-
-            for slug, source_entity_id, name in utility_specs:
-                if not source_entity_id:
-                    _LOGGER.warning(
-                        "Unable to resolve integration sensor entity for %s; skipping %s",
-                        slug,
-                        name,
-                    )
-                    continue
-
-                parent_meter = f"{entry.entry_id}_{slug}_utility"
-                utility_data[parent_meter] = {
-                    DATA_TARIFF_SENSORS: [],
-                    CONF_TARIFF_ENTITY: None,
-                }
-
-                meter = UtilityMeterSensor(
-                    hass,
-                    cron_pattern=None,
-                    delta_values=False,
-                    meter_offset=timedelta(0),
-                    meter_type=DAILY,
-                    name=name,
-                    net_consumption=False,
-                    parent_meter=parent_meter,
-                    periodically_resetting=False,
-                    source_entity=source_entity_id,
-                    tariff_entity=None,
-                    tariff=None,
-                    unique_id=f"{entry.entry_id}_{slug}",
-                    sensor_always_available=False,
-                )
-
-                utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
-                utility_entities.append(meter)
-
-            if utility_entities:
-                async_add_entities(utility_entities)
-                _LOGGER.debug(
-                    "Energy helper created %d utility meter entities for %s",
-                    len(utility_entities),
-                    coordinator.device_name,
-                )
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.exception(
-                "Energy helper failed for %s (entry_id=%s): %s",
-                coordinator.device_name,
-                entry.entry_id,
-                exc,
-            )
+        if utility_entities:
+            async_add_entities(utility_entities)
 
     await _async_setup_energy_helpers()
 
