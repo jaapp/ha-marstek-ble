@@ -159,16 +159,6 @@ async def async_setup_entry(
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
         ),
-        MarstekSensor(
-            coordinator,
-            entry,
-            "adaptive_power_out",
-            "Adaptive Power Out",
-            lambda data: None,
-            UnitOfPower.WATT,
-            SensorDeviceClass.POWER,
-            SensorStateClass.MEASUREMENT,
-        ),
         # Energy sensors
         MarstekSensor(
             coordinator,
@@ -358,14 +348,6 @@ async def async_setup_entry(
                 "meter_ip",
                 "Meter IP",
                 lambda data: data.meter_ip,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
-                "local_api_status",
-                "Local API Status",
-                lambda data: None,
                 entity_category=EntityCategory.DIAGNOSTIC,
             ),
         ]

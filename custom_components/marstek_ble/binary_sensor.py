@@ -75,13 +75,6 @@ async def async_setup_entry(
             BinarySensorDeviceClass.CONNECTIVITY,
             entity_category=EntityCategory.DIAGNOSTIC,
         ),
-        MarstekBinarySensor(
-            coordinator,
-            entry,
-            "adaptive_mode_status",
-            "Adaptive Mode",
-            lambda data: data.adaptive_mode_enabled,
-        ),
     ]
 
     async_add_entities(entities)
