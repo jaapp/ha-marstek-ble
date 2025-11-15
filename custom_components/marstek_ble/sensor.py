@@ -164,7 +164,7 @@ async def async_setup_entry(
             entry,
             "adaptive_power_out",
             "Adaptive Power Out",
-            lambda data: data.adaptive_power_out,
+            lambda data: None,
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
@@ -365,7 +365,7 @@ async def async_setup_entry(
                 entry,
                 "local_api_status",
                 "Local API Status",
-                lambda data: data.local_api_status,
+                lambda data: None,
                 entity_category=EntityCategory.DIAGNOSTIC,
             ),
         ]

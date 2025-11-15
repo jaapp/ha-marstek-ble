@@ -370,9 +370,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # CT polling rate
         await self._safe_send_and_sleep(CMD_CT_POLLING_RATE)
 
-        # Local API status
-        await self._safe_send_and_sleep(CMD_LOCAL_API_STATUS)
-
         # Meter IP
         await self._safe_send_and_sleep(CMD_METER_IP, b"\x0B")
 
@@ -383,9 +380,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         """Poll slow-update data (timer info, logs)."""
         # Device info (identity/firmware)
         await self._safe_send_and_sleep(CMD_DEVICE_INFO)
-
-        # Local API status
-        await self._safe_send_and_sleep(CMD_LOCAL_API_STATUS)
 
         # Timer info
         await self._safe_send_and_sleep(CMD_TIMER_INFO)
