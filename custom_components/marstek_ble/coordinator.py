@@ -92,6 +92,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._last_service_info: bluetooth.BluetoothServiceInfoBleak | None = None
         self._time_poll_unsub: asyncio.TimerHandle | None = None
         self._poll_lock = asyncio.Lock()
+        self._initial_poll_done = False
         self._update_poll_schedule()
 
         # Create persistent device object for command sending (SwitchBot pattern)
@@ -305,12 +306,12 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._fast_poll_count += 1
 
         # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
-        if self._fast_poll_count % self._medium_poll_cycle == 0:
+        if not self._initial_poll_done or self._fast_poll_count % self._medium_poll_cycle == 0:
             await self._poll_medium()
             self._medium_poll_count += 1
 
         # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
-        if self._fast_poll_count % self._slow_poll_cycle == 0:
+        if not self._initial_poll_done or self._fast_poll_count % self._slow_poll_cycle == 0:
             await self._poll_slow()
             self._slow_poll_count += 1
 
@@ -318,6 +319,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # retains the populated MarstekData instance.
         duration = time.monotonic() - start_monotonic
         self._last_poll_completed_at = time.time()
+        self._initial_poll_done = True
         _LOGGER.debug(
             "[%s/%s] Poll cycle end in %.3fs (commands=%s)",
             self.device_name,
