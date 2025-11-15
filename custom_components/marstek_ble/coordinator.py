@@ -34,6 +34,8 @@ from .const import (
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
     CMD_WIFI_SSID,
+    CMD_DEVICE_INFO,
+    CMD_LOCAL_API_STATUS,
     DEFAULT_POLL_INTERVAL,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
@@ -374,6 +376,12 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     async def _poll_slow(self) -> None:
         """Poll slow-update data (timer info, logs)."""
+        # Device info (identity/firmware)
+        await self._safe_send_and_sleep(CMD_DEVICE_INFO)
+
+        # Local API status
+        await self._safe_send_and_sleep(CMD_LOCAL_API_STATUS)
+
         # Timer info
         await self._safe_send_and_sleep(CMD_TIMER_INFO)
 

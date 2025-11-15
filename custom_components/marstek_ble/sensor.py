@@ -61,6 +61,7 @@ async def async_setup_entry(
             UnitOfElectricPotential.VOLT,
             SensorDeviceClass.VOLTAGE,
             SensorStateClass.MEASUREMENT,
+            suggested_display_precision=2,
         ),
         MarstekSensor(
             coordinator,
@@ -276,6 +277,7 @@ async def async_setup_entry(
                 SensorDeviceClass.VOLTAGE,
                 SensorStateClass.MEASUREMENT,
                 entity_category=EntityCategory.DIAGNOSTIC,
+                suggested_display_precision=2,
             )
         )
 
@@ -504,6 +506,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None,
         entity_category: EntityCategory | None = None,
+        suggested_display_precision: int | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -516,6 +519,8 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = state_class
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        if suggested_display_precision is not None:
+            self._attr_suggested_display_precision = suggested_display_precision
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data with telemetry for debugging staleness."""
