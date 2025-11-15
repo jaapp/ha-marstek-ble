@@ -6,6 +6,7 @@ import logging
 import math
 from datetime import timedelta
 import time
+from types import SimpleNamespace
 
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
@@ -16,6 +17,7 @@ from homeassistant.components.bluetooth.active_update_coordinator import (
     ActiveBluetoothDataUpdateCoordinator,
 )
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
     CHAR_NOTIFY_UUID,
@@ -82,6 +84,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._last_poll_started_at: float | None = None
         self._last_poll_completed_at: float | None = None
         self._current_poll_commands: list[dict[str, object]] = []
+        self._last_service_info: bluetooth.BluetoothServiceInfoBleak | None = None
+        self._time_poll_unsub: asyncio.TimerHandle | None = None
+        self._poll_lock = asyncio.Lock()
         self._update_poll_schedule()
 
         # Create persistent device object for command sending (SwitchBot pattern)
@@ -132,6 +137,23 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
                 payload.hex(),
             )
 
+    async def _safe_send_and_sleep(
+        self, command: int, payload: bytes = b"", delay: float = 0.3
+    ) -> bool:
+        """Best-effort version of _send_and_sleep that logs and continues on failure."""
+        try:
+            await self._send_and_sleep(command, payload, delay)
+            return True
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "[%s/%s] Poll command 0x%02X failed (continuing poll): %s",
+                self.device_name,
+                self.address,
+                command,
+                err,
+            )
+            return False
+
     def _sanitize_poll_interval(self, poll_interval: int) -> int:
         """Clamp the polling interval to supported bounds."""
         if poll_interval < MIN_POLL_INTERVAL:
@@ -158,6 +180,13 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
         self._slow_poll_cycle = max(
             1, math.ceil(UPDATE_INTERVAL_SLOW / self._poll_interval)
+        )
+        if self._time_poll_unsub:
+            self._time_poll_unsub()
+            self._time_poll_unsub = None
+        # Start a strict time-based poll regardless of advertisements.
+        self._time_poll_unsub = async_track_time_interval(
+            self.hass, self._async_time_poll, timedelta(seconds=self._poll_interval)
         )
         _LOGGER.debug(
             "Polling schedule updated: fast=%ss, medium every %s updates, slow every %s updates",
@@ -217,10 +246,38 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self, service_info: bluetooth.BluetoothServiceInfoBleak
     ) -> MarstekData:
         """Poll the device for data."""
+        async with self._poll_lock:
+            return await self._async_run_poll(service_info)
+
+    async def _async_time_poll(self, _now) -> None:
+        """Time-based poll fallback when no advertisements arrive."""
+        # Build a minimal service_info stand-in when we haven't seen fresh advertisements.
+        service_info = self._last_service_info
+        if service_info is None:
+            ble_dev = bluetooth.async_ble_device_from_address(
+                self.hass, self.address, connectable=True
+            )
+            if not ble_dev:
+                _LOGGER.debug(
+                    "[%s/%s] Time poll skipped: no connectable BLE device available",
+                    self.device_name,
+                    self.address,
+                )
+                return
+            service_info = SimpleNamespace(device=ble_dev)
+
+        async with self._poll_lock:
+            await self._async_run_poll(service_info)
+
+    async def _async_run_poll(
+        self, service_info: bluetooth.BluetoothServiceInfoBleak
+    ) -> MarstekData:
+        """Shared poll execution path (used by event and timer triggers)."""
         start_monotonic = time.monotonic()
         wall_start = time.time()
         self._last_poll_started_at = wall_start
         self._current_poll_commands = []
+        self._last_service_info = service_info
         _LOGGER.debug(
             "[%s/%s] Poll cycle start (interval=%ss, since_last=%.1fs) from %s",
             self.device_name,
@@ -279,10 +336,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
 
         # Runtime info - now waits for actual response (Venus Monitor pattern)
-        await self._send_and_sleep(CMD_RUNTIME_INFO, delay=0.1)
+        await self._safe_send_and_sleep(CMD_RUNTIME_INFO, delay=0.1)
 
         # BMS data - now waits for actual response
-        await self._send_and_sleep(CMD_BMS_DATA, delay=0.1)
+        await self._safe_send_and_sleep(CMD_BMS_DATA, delay=0.1)
 
         _LOGGER.debug(
             "[%s/%s] Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
@@ -295,33 +352,33 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     async def _poll_medium(self) -> None:
         """Poll medium-update data (system, WiFi, config, etc)."""
         # System data
-        await self._send_and_sleep(CMD_SYSTEM_DATA)
+        await self._safe_send_and_sleep(CMD_SYSTEM_DATA)
 
         # WiFi SSID
-        await self._send_and_sleep(CMD_WIFI_SSID)
+        await self._safe_send_and_sleep(CMD_WIFI_SSID)
 
         # Config data
-        await self._send_and_sleep(CMD_CONFIG_DATA)
+        await self._safe_send_and_sleep(CMD_CONFIG_DATA)
 
         # CT polling rate
-        await self._send_and_sleep(CMD_CT_POLLING_RATE)
+        await self._safe_send_and_sleep(CMD_CT_POLLING_RATE)
 
         # Local API status
-        await self._send_and_sleep(CMD_LOCAL_API_STATUS)
+        await self._safe_send_and_sleep(CMD_LOCAL_API_STATUS)
 
         # Meter IP
-        await self._send_and_sleep(CMD_METER_IP, b"\x0B")
+        await self._safe_send_and_sleep(CMD_METER_IP, b"\x0B")
 
         # Network info
-        await self._send_and_sleep(CMD_NETWORK_INFO)
+        await self._safe_send_and_sleep(CMD_NETWORK_INFO)
 
     async def _poll_slow(self) -> None:
         """Poll slow-update data (timer info, logs)."""
         # Timer info
-        await self._send_and_sleep(CMD_TIMER_INFO)
+        await self._safe_send_and_sleep(CMD_TIMER_INFO)
 
         # Logs
-        await self._send_and_sleep(CMD_LOGS)
+        await self._safe_send_and_sleep(CMD_LOGS)
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""

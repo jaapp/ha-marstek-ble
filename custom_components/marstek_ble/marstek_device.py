@@ -732,6 +732,7 @@ class MarstekBLEDevice:
                 attempts_made = attempt + 1
                 start_time = time.monotonic()
                 wall_time = time.time()
+                response_received = False
                 try:
                     await self._ensure_connected()
 
@@ -765,6 +766,7 @@ class MarstekBLEDevice:
                     # Wait for response (timeout 2000ms like Venus Monitor)
                     try:
                         await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
+                        response_received = True
                         _LOGGER.debug(
                             "%s: Command 0x%02X sent and response received",
                             self._device_name,
@@ -776,7 +778,6 @@ class MarstekBLEDevice:
                             self._device_name,
                             cmd
                         )
-                        # Continue anyway - device might not respond to some commands
                     finally:
                         # Clear waiting state
                         self._pending_command = None
@@ -787,17 +788,18 @@ class MarstekBLEDevice:
                         cmd=cmd,
                         frame=command_data,
                         attempts=attempts_made,
-                        success=True,
-                        error=None,
+                        success=response_received,
+                        error=None if response_received else "no_response",
                     )
                     _LOGGER.debug(
-                        "%s: Command 0x%02X succeeded in %.3fs after %d attempt(s)",
+                        "%s: Command 0x%02X %s in %.3fs after %d attempt(s)",
                         self._device_name,
                         cmd,
+                        "succeeded" if response_received else "had no response",
                         duration,
                         attempts_made,
                     )
-                    return True
+                    return response_received
 
                 except (BleakError, TimeoutError) as ex:
                     last_error = str(ex)
@@ -888,6 +890,7 @@ class MarstekBLEDevice:
                 "attempts": attempts,
                 "success": success,
                 "error": error,
+                "response": "received" if success else "no_response" if error == "no_response" else "error",
             }
         )
 
