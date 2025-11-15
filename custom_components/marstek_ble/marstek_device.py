@@ -14,11 +14,22 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
+from .const import CMD_BMS_DATA, COMMAND_NAMES, TURBO_LOG_MODE
+
 _LOGGER = logging.getLogger(__name__)
+TRACE_LEVEL = logging.DEBUG
 
 # BLE UUIDs
 CHAR_WRITE_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
 CHAR_NOTIFY_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
+
+
+def _command_label(command: int) -> str:
+    """Return a friendly label for a command byte."""
+    name = COMMAND_NAMES.get(command)
+    if name:
+        return f"{name} (0x{command:02X})"
+    return f"0x{command:02X}"
 
 
 @dataclass
@@ -403,6 +414,11 @@ class MarstekBLEDevice:
         self._pending_command: int | None = None
         self._response_event: asyncio.Event | None = None
         self._response_data: bytes | None = None
+        self._trace(
+            "BLE device wrapper initialized (initial_address=%s, notifications_callback=%s)",
+            self._ble_device.address if self._ble_device else "unknown",
+            self._notification_callback is not None,
+        )
 
     @property
     def name(self) -> str:
@@ -414,32 +430,56 @@ class MarstekBLEDevice:
         """Return the device address."""
         return self._ble_device.address
 
+    def _trace(self, message: str, *args, level: int = TRACE_LEVEL) -> None:
+        """Emit a turbo-trace log entry."""
+        address = getattr(self._ble_device, "address", "unknown") if self._ble_device else "unknown"
+        _LOGGER.log(
+            level,
+            "[TRACE][%s/%s] " + message,
+            self._device_name,
+            address,
+            *args,
+        )
+
     async def _ensure_connected(self) -> None:
         """Ensure we have an active BLE connection."""
         if self._client and self._client.is_connected:
             _LOGGER.debug("%s: Already connected", self._device_name)
+            self._trace("Connection already active")
             return
 
         async with self._connect_lock:
             # Double-check after acquiring lock
             if self._client and self._client.is_connected:
+                self._trace("Connection became active while waiting for lock")
                 return
 
             _LOGGER.debug("%s: Establishing connection", self._device_name)
+            self._trace("Establishing BLE connection")
 
             # Get fresh BLE device if callback available
             if self._ble_device_callback:
                 refreshed_device = self._ble_device_callback()
                 if refreshed_device is not None:
                     self._ble_device = refreshed_device
+                    self._trace(
+                        "BLE device refreshed before connect (address=%s)",
+                        self._ble_device.address,
+                    )
                 else:
                     _LOGGER.debug(
                         "%s: ble_device_callback returned None; reusing last known device %s",
                         self._device_name,
                         self._ble_device.address if self._ble_device else "unknown",
                     )
+                    self._trace(
+                        "BLE device callback returned None; reusing last known device %s",
+                        self._ble_device.address if self._ble_device else "unknown",
+                        level=logging.WARNING,
+                    )
 
             if self._ble_device is None:
+                self._trace("Cannot connect because no BLE device is available", level=logging.ERROR)
                 raise BleakError(
                     f"{self._device_name}: No connectable BLE device available to establish connection"
                 )
@@ -454,6 +494,7 @@ class MarstekBLEDevice:
                     ble_device_callback=self._ble_device_callback,
                 )
                 _LOGGER.debug("%s: Connected successfully", self._device_name)
+                self._trace("BLE connection established successfully")
 
                 # Start notifications if callback provided
                 if self._notification_callback and not self._notifications_started:
@@ -463,6 +504,10 @@ class MarstekBLEDevice:
                     )
                     self._notifications_started = True
                     _LOGGER.debug("%s: Notifications started successfully", self._device_name)
+                    self._trace(
+                        "Notifications started on characteristic %s",
+                        CHAR_NOTIFY_UUID,
+                    )
                 else:
                     _LOGGER.debug(
                         "%s: Notifications already started or no callback (callback=%s, started=%s)",
@@ -470,10 +515,20 @@ class MarstekBLEDevice:
                         self._notification_callback is not None,
                         self._notifications_started,
                     )
+                    self._trace(
+                        "Notifications start skipped (callback=%s started=%s)",
+                        self._notification_callback is not None,
+                        self._notifications_started,
+                    )
 
             except (BleakError, TimeoutError) as ex:
                 _LOGGER.warning(
                     "%s: Failed to connect: %s", self._device_name, ex
+                )
+                self._trace(
+                    "Failed to connect: %s",
+                    ex,
+                    level=logging.ERROR,
                 )
                 raise
 
@@ -484,6 +539,11 @@ class MarstekBLEDevice:
             self._expected_disconnect = False
         else:
             _LOGGER.warning("%s: Unexpected disconnect", self._device_name)
+        self._trace(
+            "Disconnected from BLE client (expected=%s)",
+            self._expected_disconnect,
+            level=logging.WARNING if not self._expected_disconnect else TRACE_LEVEL,
+        )
         self._client = None
         self._notifications_started = False
 
@@ -497,6 +557,7 @@ class MarstekBLEDevice:
         self._disconnect_timer = loop.call_later(
             30.0, lambda: asyncio.create_task(self._execute_disconnect())
         )
+        self._trace("Disconnect timer scheduled for 30s of inactivity")
 
     async def _execute_disconnect(self) -> None:
         """Execute disconnection."""
@@ -505,10 +566,15 @@ class MarstekBLEDevice:
                 _LOGGER.debug("%s: Disconnecting due to inactivity", self._device_name)
                 self._expected_disconnect = True
                 await self._client.disconnect()
+                self._trace("Disconnected due to inactivity timeout")
             self._disconnect_timer = None
 
     async def send_command(
-        self, cmd: int, payload: bytes = b"", retry: int = 3
+        self,
+        cmd: int,
+        payload: bytes = b"",
+        retry: int = 3,
+        timeout: float | None = 5.0,
     ) -> bool:
         """Send a command to the device.
 
@@ -523,11 +589,22 @@ class MarstekBLEDevice:
         command_data = MarstekProtocol.build_command(cmd, payload)
         attempts_made = 0
         last_error: str | None = None
+        label = _command_label(cmd)
+        payload_hex = payload.hex() if payload else "<empty>"
+        frame_hex = command_data.hex()
 
         async with self._operation_lock:
             for attempt in range(retry):
                 attempts_made = attempt + 1
                 try:
+                    self._trace(
+                        "TX %s attempt %d/%d payload=%s frame=%s",
+                        label,
+                        attempt + 1,
+                        retry,
+                        payload_hex,
+                        frame_hex,
+                    )
                     await self._ensure_connected()
 
                     # Setup response waiting (Venus Monitor pattern)
@@ -545,22 +622,34 @@ class MarstekBLEDevice:
                     )
 
                     await self._client.write_gatt_char(CHAR_WRITE_UUID, command_data)
+                    self._trace(
+                        "TX %s dispatched; awaiting response (timeout=%ss)",
+                        label,
+                        timeout,
+                    )
 
                     self._reset_disconnect_timer()
 
-                    # Wait for response (timeout 2000ms like Venus Monitor)
+                    # Wait for response
                     try:
-                        await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
+                        await asyncio.wait_for(self._response_event.wait(), timeout=timeout)
                         _LOGGER.debug(
                             "%s: Command 0x%02X sent and response received",
                             self._device_name,
                             cmd
                         )
+                        self._trace("Response received for %s", label)
                     except asyncio.TimeoutError:
                         _LOGGER.warning(
                             "%s: Timeout waiting for response to command 0x%02X",
                             self._device_name,
                             cmd
+                        )
+                        self._trace(
+                            "Timeout waiting for response to %s after %ss",
+                            label,
+                            timeout,
+                            level=logging.WARNING,
                         )
                         # Continue anyway - device might not respond to some commands
                     finally:
@@ -575,6 +664,11 @@ class MarstekBLEDevice:
                         success=True,
                         error=None,
                     )
+                    self._trace(
+                        "TX %s succeeded after %d attempt(s)",
+                        label,
+                        attempts_made,
+                    )
                     return True
 
                 except (BleakError, TimeoutError) as ex:
@@ -586,6 +680,14 @@ class MarstekBLEDevice:
                         attempt + 1,
                         retry,
                         ex,
+                    )
+                    self._trace(
+                        "TX %s failed on attempt %d/%d due to %s",
+                        label,
+                        attempt + 1,
+                        retry,
+                        ex,
+                        level=logging.ERROR,
                     )
                     # Force reconnect on next attempt
                     if self._client:
@@ -605,6 +707,13 @@ class MarstekBLEDevice:
                 cmd,
                 retry,
             )
+            self._trace(
+                "TX %s failed after %d attempts (last_error=%s)",
+                label,
+                retry,
+                last_error,
+                level=logging.ERROR,
+            )
             self._record_command_result(
                 cmd=cmd,
                 frame=command_data,
@@ -616,6 +725,7 @@ class MarstekBLEDevice:
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
+        self._trace("Manual disconnect requested")
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
             self._disconnect_timer = None
@@ -636,6 +746,7 @@ class MarstekBLEDevice:
                 self._expected_disconnect = True
                 await self._client.disconnect()
             self._client = None
+        self._trace("Disconnect routine completed")
 
     @property
     def is_connected(self) -> bool:
@@ -690,6 +801,16 @@ class MarstekBLEDevice:
         timestamp = time.time()
         command = data[3] if len(data) > 3 else None
         payload = data[4:-1] if len(data) > 5 else b""
+        label = _command_label(command) if command is not None else "unknown"
+        self._trace(
+            "RX %s from sender %s len=%s parsed=%s payload=%s frame=%s",
+            label,
+            sender,
+            len(data),
+            parsed,
+            payload.hex() if payload else "<empty>",
+            data.hex(),
+        )
 
         entry = {
             "timestamp": timestamp,
@@ -716,6 +837,24 @@ class MarstekBLEDevice:
                 )
                 self._response_data = data
                 self._response_event.set()
+                self._trace(
+                    "Response event fulfilled by %s (%d bytes)",
+                    label,
+                    len(data),
+                )
+
+            if command == CMD_BMS_DATA:
+                _LOGGER.debug(
+                    "%s: BMS notification details (len=%d, parsed=%s)",
+                    self._device_name,
+                    len(data),
+                    parsed,
+                )
+                self._trace(
+                    "BMS notification parsed=%s len=%d",
+                    parsed,
+                    len(data),
+                )
 
     @staticmethod
     def _iso_timestamp(timestamp: float | None) -> str | None:

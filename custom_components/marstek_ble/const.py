@@ -53,3 +53,33 @@ CMD_LOCAL_API_STATUS = 0x28
 # Frame structure
 FRAME_START = 0x73
 FRAME_TYPE = 0x23
+
+# Logging / diagnostics
+TURBO_LOG_MODE = True
+
+COMMAND_NAMES: dict[int, str] = {
+    CMD_RUNTIME_INFO: "runtime_info",
+    CMD_DEVICE_INFO: "device_info",
+    CMD_EPS_MODE: "eps_mode",
+    CMD_AC_INPUT: "ac_input",
+    CMD_GENERATOR: "generator",
+    CMD_WIFI_SSID: "wifi_ssid",
+    CMD_BUZZER: "buzzer",
+    CMD_CHARGE_MODE: "charge_mode",
+    CMD_SYSTEM_DATA: "system_data",
+    CMD_OUTPUT_CONTROL: "output_control",
+    CMD_ADAPTIVE_MODE: "adaptive_mode",
+    CMD_TIMER_INFO: "timer_info",
+    CMD_BMS_DATA: "bms_data",
+    CMD_POWER_MODE: "power_mode",
+    CMD_AC_POWER: "ac_power",
+    CMD_TOTAL_POWER: "total_power",
+    CMD_CONFIG_DATA: "config_data",
+    CMD_LOGS: "logs",
+    CMD_CT_POLLING_RATE_WRITE: "ct_polling_rate_write",
+    CMD_CT_POLLING_RATE: "ct_polling_rate",
+    CMD_METER_IP: "meter_ip",
+    CMD_NETWORK_INFO: "network_info",
+    CMD_REBOOT: "reboot",
+    CMD_LOCAL_API_STATUS: "local_api_status",
+}
