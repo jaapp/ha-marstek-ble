@@ -1,6 +1,7 @@
 """Sensor platform for Marstek BLE integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from datetime import timedelta
@@ -357,8 +358,6 @@ async def async_setup_entry(
 
     async def _async_setup_energy_helpers() -> None:
         """Create integration and daily utility meter sensors once base sensors are registered."""
-        await hass.async_block_till_done()
-
         entity_registry = er.async_get(hass)
 
         def _resolve_entity_id(key: str) -> str | None:
@@ -366,56 +365,68 @@ async def async_setup_entry(
                 "sensor", DOMAIN, f"{entry.entry_id}_{key}"
             )
 
-        power_in_entity_id = _resolve_entity_id("battery_power_in")
-        power_out_entity_id = _resolve_entity_id("battery_power_out")
+        max_attempts = 6
+        delay = 5
+
+        power_in_entity_id: str | None = None
+        power_out_entity_id: str | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            await hass.async_block_till_done()
+            power_in_entity_id = _resolve_entity_id("battery_power_in")
+            power_out_entity_id = _resolve_entity_id("battery_power_out")
+
+            if power_in_entity_id and power_out_entity_id:
+                break
+
+            if attempt < max_attempts:
+                _LOGGER.debug(
+                    "Energy helper setup waiting for power entities (%s/%s): in=%s out=%s",
+                    attempt,
+                    max_attempts,
+                    power_in_entity_id,
+                    power_out_entity_id,
+                )
+                await asyncio.sleep(delay)
+            else:
+                _LOGGER.warning(
+                    "Energy helper setup failed to resolve power entities for %s; giving up",
+                    coordinator.device_name,
+                )
+                return
 
         energy_entities: list[IntegrationSensor] = []
 
-        if power_in_entity_id:
-            energy_entities.append(
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy In",
-                    round_digits=3,
-                    source_entity=power_in_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_in",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                )
+        energy_entities.append(
+            IntegrationSensor(
+                hass,
+                integration_method=METHOD_TRAPEZOIDAL,
+                name=f"{coordinator.device_name} Battery Energy In",
+                round_digits=3,
+                source_entity=power_in_entity_id,
+                unique_id=f"{entry.entry_id}_battery_energy_in",
+                unit_prefix=None,
+                unit_time=UnitOfTime.HOURS,
+                max_sub_interval=None,
             )
-        else:
-            _LOGGER.warning(
-                "Unable to resolve battery power in entity for %s; skipping Battery Energy In sensor",
-                coordinator.device_name,
-            )
+        )
 
-        if power_out_entity_id:
-            energy_entities.append(
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy Out",
-                    round_digits=3,
-                    source_entity=power_out_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_out",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                )
+        energy_entities.append(
+            IntegrationSensor(
+                hass,
+                integration_method=METHOD_TRAPEZOIDAL,
+                name=f"{coordinator.device_name} Battery Energy Out",
+                round_digits=3,
+                source_entity=power_out_entity_id,
+                unique_id=f"{entry.entry_id}_battery_energy_out",
+                unit_prefix=None,
+                unit_time=UnitOfTime.HOURS,
+                max_sub_interval=None,
             )
-        else:
-            _LOGGER.warning(
-                "Unable to resolve battery power out entity for %s; skipping Battery Energy Out sensor",
-                coordinator.device_name,
-            )
+        )
 
-        if energy_entities:
-            async_add_entities(energy_entities)
-            await hass.async_block_till_done()
-        else:
-            return
+        async_add_entities(energy_entities)
+        await hass.async_block_till_done()
 
         energy_in_entity_id = _resolve_entity_id("battery_energy_in")
         energy_out_entity_id = _resolve_entity_id("battery_energy_out")
