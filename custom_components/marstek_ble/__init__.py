@@ -101,6 +101,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     _LOGGER.debug("Unloading Marstek BLE entry: %s", entry.data)
 
+    # Disconnect device to force advertising again for the next reload/setup
+    domain_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator: MarstekDataUpdateCoordinator | None = (
+        domain_data.get("coordinator") if domain_data else None
+    )
+    if coordinator:
+        await coordinator.device.disconnect()
+
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
