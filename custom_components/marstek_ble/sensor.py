@@ -1,6 +1,7 @@
 """Sensor platform for Marstek BLE integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from datetime import timedelta
@@ -35,11 +36,15 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+VERBOSE_LOGGER.propagate = False
+VERBOSE_LOGGER.setLevel(logging.INFO)
 
 
 async def async_setup_entry(
@@ -61,6 +66,7 @@ async def async_setup_entry(
             UnitOfElectricPotential.VOLT,
             SensorDeviceClass.VOLTAGE,
             SensorStateClass.MEASUREMENT,
+            suggested_display_precision=2,
         ),
         MarstekSensor(
             coordinator,
@@ -151,16 +157,6 @@ async def async_setup_entry(
             "out1_power",
             "Output 1 Power",
             lambda data: data.out1_power,
-            UnitOfPower.WATT,
-            SensorDeviceClass.POWER,
-            SensorStateClass.MEASUREMENT,
-        ),
-        MarstekSensor(
-            coordinator,
-            entry,
-            "adaptive_power_out",
-            "Adaptive Power Out",
-            lambda data: data.adaptive_power_out,
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
@@ -276,6 +272,7 @@ async def async_setup_entry(
                 SensorDeviceClass.VOLTAGE,
                 SensorStateClass.MEASUREMENT,
                 entity_category=EntityCategory.DIAGNOSTIC,
+                suggested_display_precision=2,
             )
         )
 
@@ -355,14 +352,6 @@ async def async_setup_entry(
                 lambda data: data.meter_ip,
                 entity_category=EntityCategory.DIAGNOSTIC,
             ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
-                "local_api_status",
-                "Local API Status",
-                lambda data: data.local_api_status,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
         ]
     )
 
@@ -370,22 +359,66 @@ async def async_setup_entry(
 
     async def _async_setup_energy_helpers() -> None:
         """Create integration and daily utility meter sensors once base sensors are registered."""
-        await hass.async_block_till_done()
+        try:
+            entity_registry = er.async_get(hass)
 
-        entity_registry = er.async_get(hass)
+            def _resolve_entity_id(key: str) -> str | None:
+                return entity_registry.async_get_entity_id(
+                    "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+                )
 
-        def _resolve_entity_id(key: str) -> str | None:
-            return entity_registry.async_get_entity_id(
-                "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+            _LOGGER.debug(
+                "Energy helper starting for %s (entry_id=%s)",
+                coordinator.device_name,
+                entry.entry_id,
             )
 
-        power_in_entity_id = _resolve_entity_id("battery_power_in")
-        power_out_entity_id = _resolve_entity_id("battery_power_out")
+            max_attempts = 6
+            delay = 5
 
-        energy_entities: list[IntegrationSensor] = []
+            power_in_entity_id: str | None = None
+            power_out_entity_id: str | None = None
 
-        if power_in_entity_id:
-            energy_entities.append(
+            for attempt in range(1, max_attempts + 1):
+                await hass.async_block_till_done()
+                power_in_entity_id = _resolve_entity_id("battery_power_in")
+                power_out_entity_id = _resolve_entity_id("battery_power_out")
+
+                _LOGGER.debug(
+                    "Energy helper attempt %s/%s for %s: in=%s out=%s",
+                    attempt,
+                    max_attempts,
+                    coordinator.device_name,
+                    power_in_entity_id,
+                    power_out_entity_id,
+                )
+
+                if power_in_entity_id and power_out_entity_id:
+                    break
+
+                if attempt < max_attempts:
+                    await asyncio.sleep(delay)
+                else:
+                    _LOGGER.warning(
+                        "Energy helper setup failed to resolve power entities for %s; giving up",
+                        coordinator.device_name,
+                    )
+                    return
+
+            # Fallback: if still missing (edge case), construct expected entity_ids from slugified device name
+            if not power_in_entity_id:
+                power_in_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_in"
+            if not power_out_entity_id:
+                power_out_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_out"
+
+            _LOGGER.debug(
+                "Energy helper resolved power entities for %s: in=%s out=%s",
+                coordinator.device_name,
+                power_in_entity_id,
+                power_out_entity_id,
+            )
+
+            energy_entities: list[IntegrationSensor] = [
                 IntegrationSensor(
                     hass,
                     integration_method=METHOD_TRAPEZOIDAL,
@@ -396,16 +429,7 @@ async def async_setup_entry(
                     unit_prefix=None,
                     unit_time=UnitOfTime.HOURS,
                     max_sub_interval=None,
-                )
-            )
-        else:
-            _LOGGER.warning(
-                "Unable to resolve battery power in entity for %s; skipping Battery Energy In sensor",
-                coordinator.device_name,
-            )
-
-        if power_out_entity_id:
-            energy_entities.append(
+                ),
                 IntegrationSensor(
                     hass,
                     integration_method=METHOD_TRAPEZOIDAL,
@@ -416,78 +440,72 @@ async def async_setup_entry(
                     unit_prefix=None,
                     unit_time=UnitOfTime.HOURS,
                     max_sub_interval=None,
-                )
-            )
-        else:
-            _LOGGER.warning(
-                "Unable to resolve battery power out entity for %s; skipping Battery Energy Out sensor",
-                coordinator.device_name,
-            )
+                ),
+            ]
 
-        if energy_entities:
             async_add_entities(energy_entities)
             await hass.async_block_till_done()
-        else:
-            return
 
-        energy_in_entity_id = _resolve_entity_id("battery_energy_in")
-        energy_out_entity_id = _resolve_entity_id("battery_energy_out")
+            energy_in_entity_id = _resolve_entity_id("battery_energy_in")
+            energy_out_entity_id = _resolve_entity_id("battery_energy_out")
 
-        utility_entities: list[UtilityMeterSensor] = []
-        utility_data = hass.data.setdefault(DATA_UTILITY, {})
+            utility_entities: list[UtilityMeterSensor] = []
+            utility_data = hass.data.setdefault(DATA_UTILITY, {})
 
-        utility_specs: list[tuple[str, str | None, str]] = [
-            (
-                "daily_battery_energy_in",
-                energy_in_entity_id,
-                f"{coordinator.device_name} Daily Battery Energy In",
-            ),
-            (
-                "daily_battery_energy_out",
-                energy_out_entity_id,
-                f"{coordinator.device_name} Daily Battery Energy Out",
-            ),
-        ]
+            for slug, source_entity_id, name in [
+                ("daily_battery_energy_in", energy_in_entity_id, f"{coordinator.device_name} Daily Battery Energy In"),
+                ("daily_battery_energy_out", energy_out_entity_id, f"{coordinator.device_name} Daily Battery Energy Out"),
+            ]:
+                if not source_entity_id:
+                    _LOGGER.warning(
+                        "Unable to resolve integration sensor entity for %s; skipping %s",
+                        slug,
+                        name,
+                    )
+                    continue
 
-        for slug, source_entity_id, name in utility_specs:
-            if not source_entity_id:
-                _LOGGER.warning(
-                    "Unable to resolve integration sensor entity for %s; skipping %s",
-                    slug,
-                    name,
+                parent_meter = f"{entry.entry_id}_{slug}_utility"
+                utility_data[parent_meter] = {
+                    DATA_TARIFF_SENSORS: [],
+                    CONF_TARIFF_ENTITY: None,
+                }
+
+                meter = UtilityMeterSensor(
+                    hass,
+                    cron_pattern=None,
+                    delta_values=False,
+                    meter_offset=timedelta(0),
+                    meter_type=DAILY,
+                    name=name,
+                    net_consumption=False,
+                    parent_meter=parent_meter,
+                    periodically_resetting=False,
+                    source_entity=source_entity_id,
+                    tariff_entity=None,
+                    tariff=None,
+                    unique_id=f"{entry.entry_id}_{slug}",
+                    sensor_always_available=False,
                 )
-                continue
 
-            parent_meter = f"{entry.entry_id}_{slug}_utility"
-            utility_data[parent_meter] = {
-                DATA_TARIFF_SENSORS: [],
-                CONF_TARIFF_ENTITY: None,
-            }
+                utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
+                utility_entities.append(meter)
 
-            meter = UtilityMeterSensor(
-                hass,
-                cron_pattern=None,
-                delta_values=False,
-                meter_offset=timedelta(0),
-                meter_type=DAILY,
-                name=name,
-                net_consumption=False,
-                parent_meter=parent_meter,
-                periodically_resetting=False,
-                source_entity=source_entity_id,
-                tariff_entity=None,
-                tariff=None,
-                unique_id=f"{entry.entry_id}_{slug}",
-                sensor_always_available=False,
+            if utility_entities:
+                async_add_entities(utility_entities)
+                _LOGGER.debug(
+                    "Energy helper created %d utility meter entities for %s",
+                    len(utility_entities),
+                    coordinator.device_name,
+                )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception(
+                "Energy helper failed for %s (entry_id=%s): %s",
+                coordinator.device_name,
+                entry.entry_id,
+                exc,
             )
 
-            utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
-            utility_entities.append(meter)
-
-        if utility_entities:
-            async_add_entities(utility_entities)
-
-    hass.async_create_task(_async_setup_energy_helpers())
+    await _async_setup_energy_helpers()
 
 
 class MarstekSensor(CoordinatorEntity, SensorEntity):
@@ -504,6 +522,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None,
         entity_category: EntityCategory | None = None,
+        suggested_display_precision: int | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -516,6 +535,25 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = state_class
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        if suggested_display_precision is not None:
+            self._attr_suggested_display_precision = suggested_display_precision
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data with telemetry for debugging staleness."""
+        value = self.native_value
+        meta = self.coordinator.data.get_field_metadata(self._key)
+        VERBOSE_LOGGER.debug(
+            "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
+            self.coordinator.device_name,
+            self.coordinator.address,
+            self._key,
+            value,
+            meta.get("command_hex") if meta else "unknown",
+            meta.get("timestamp") if meta else "unknown",
+            meta.get("age_seconds", -1) if meta else -1,
+            meta.get("payload_hex") if meta else "unknown",
+        )
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -559,6 +597,23 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         self._value_fn = value_fn
         self._attr_entity_category = entity_category
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data with telemetry for debugging staleness."""
+        value = self.native_value
+        meta = self.coordinator.data.get_field_metadata(self._key)
+        VERBOSE_LOGGER.debug(
+            "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
+            self.coordinator.device_name,
+            self.coordinator.address,
+            self._key,
+            value,
+            meta.get("command_hex") if meta else "unknown",
+            meta.get("timestamp") if meta else "unknown",
+            meta.get("age_seconds", -1) if meta else -1,
+            meta.get("payload_hex") if meta else "unknown",
+        )
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
