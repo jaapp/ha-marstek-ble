@@ -43,6 +43,14 @@ async def async_setup_entry(
         MarstekButton(
             coordinator,
             entry,
+            "enable_ai_mode",
+            "Enable AI Optimization (Experimental)",
+            CMD_ADAPTIVE_MODE,
+            b"\x01",
+        ),
+        MarstekButton(
+            coordinator,
+            entry,
             "set_800w_mode",
             "Set 800W Mode",
             CMD_POWER_MODE,

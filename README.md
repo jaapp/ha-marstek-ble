@@ -125,6 +125,12 @@ Add the cumulative totals to Home Assistant's Energy Dashboard using your device
 
 These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the recommended sources for long-term battery accounting.
 
+## Mode controls
+
+- **Self-Consumption (Auto)**: toggled via command `0x0E`; exposed as on/off switches. Mirrors the app’s “Self Consumption” mode.
+- **Manual (Work Mode)**: toggled via command `0x09`; exposed as on/off switches. Mirrors the app’s “Manual” mode for manual scheduling.
+- **AI Optimization / Trade**: enabled via command `0x11`; exposed as an experimental button (“Enable AI Optimization”) and reflected in the Adaptive Mode switch state.
+
 ## Supported Devices
 
 - Marstek Venus E hardware v2 (`MST_ACCP_*` - tested)
