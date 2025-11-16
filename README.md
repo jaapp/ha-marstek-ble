@@ -128,8 +128,6 @@ These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the rec
 - Marstek Venus E hardware v2 (`MST_ACCP_*` - tested)
 - Marstek Venus E hardware v3 (`MST_VNSE3_*` - untested)
 
-**Note:** CT devices (e.g., `MST-SMR_*`) are not batteries and will not be shown in device discovery.
-
 ## BLE Proxy Setup
 
 To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/components/bluetooth_proxy/):
@@ -148,7 +146,7 @@ Any ESP32 device will work as a Bluetooth proxy. Popular options include:
 1. Flash an ESP32 device with ESPHome
 2. Add the bluetooth_proxy component
 3. Add to Home Assistant
-4. Your Marstek batteries will automatically use the proxy when needed
+4. Home Assistant will automatically route Marstek BLE traffic through the proxy when needed
 
 ## Development & Testing
 
@@ -172,29 +170,6 @@ The integration supports multiple batteries. To test:
 2. Add each battery separately via the UI
 3. Each will appear as a separate integration entry
 4. Each battery gets its own set of entities
-
-### BLE Proxy Testing
-
-1. Set up an ESP32 with ESPHome BLE Proxy:
-   ```yaml
-   esphome:
-     name: ble-proxy
-
-   esp32:
-     board: esp32dev
-
-   bluetooth_proxy:
-     active: true
-   ```
-2. Flash and add to Home Assistant
-3. Move Marstek battery out of direct BLE range
-4. Verify connection maintains through proxy
-
-## Troubleshooting
-
-- **Device not discovered**: Ensure Bluetooth is enabled on your HA server and the battery is within range
-- **Connection issues**: Check battery is not connected to another device (ESPHome gateway, mobile app)
-- **Entities unavailable**: Connection may be lost; entities will restore when reconnected
 
 ## Attribution
 
