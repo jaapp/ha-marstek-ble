@@ -127,9 +127,9 @@ These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the rec
 
 ## Mode controls
 
-- **Self-Consumption (Auto)**: toggled via command `0x0E`; exposed as on/off switches. Mirrors the app’s “Self Consumption” mode.
-- **Manual (Work Mode)**: toggled via command `0x09`; exposed as on/off switches. Mirrors the app’s “Manual” mode for manual scheduling.
-- **AI Optimization / Trade**: enabled via command `0x11`; exposed as an experimental button (“Enable AI Optimization”) and reflected in the Adaptive Mode switch state.
+- **Self-Consumption (Auto)**: command `0x0E`; exposed as “Self-Consumption Mode On/Off” buttons. Mirrors the app’s “Self Consumption” mode.
+- **Manual (Work Mode)**: command `0x09`; exposed as “Manual Mode On/Off” buttons. Mirrors the app’s “Manual” mode for manual scheduling.
+- **AI Optimization / Trade**: command `0x11`; exposed as an experimental button (“Enable AI Optimization”) and reflected in the Adaptive Mode switch state.
 
 ## Supported Devices
 

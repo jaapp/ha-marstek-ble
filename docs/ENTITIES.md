@@ -14,6 +14,10 @@ This page documents every entity the Marstek BLE integration exposes, grouped by
 | --- | --- | --- |
 | `Reboot` (`button.<device>_reboot`) | `0x25` + `""` | Reboots the inverter/BMS controller. |
 | `Enable AI Optimization (Experimental)` (`button.<device>_enable_ai_mode`) | `0x11` + `0x01` | Sends the adaptive/AI/Trade mode enable command; experimental (state also exposed via the Adaptive Mode switch). |
+| `Self-Consumption Mode On` (`button.<device>_self_consumption_on`) | `0x0E` + `0x01` | Sets Auto/Self-Consumption mode. |
+| `Self-Consumption Mode Off` (`button.<device>_self_consumption_off`) | `0x0E` + `0x00` | Disables Auto/Self-Consumption mode. |
+| `Manual Mode On` (`button.<device>_manual_mode_on`) | `0x09` + `0x01` | Enables Manual/Work mode. |
+| `Manual Mode Off` (`button.<device>_manual_mode_off`) | `0x09` + `0x00` | Disables Manual/Work mode. |
 | `Set 800W Mode` (`button.<device>_set_800w_mode`) | `0x15` + `0x20 0x03` | Writes the 800 W power-capacity setting. |
 | `Set 2500W Mode` (`button.<device>_set_2500w_mode`) | `0x15` + `0xC4 0x09` | Writes the 2 500 W power-capacity setting. |
 | `Set AC Power 2500W` (`button.<device>_set_ac_power_2500w`) | `0x16` + `0xC4 0x09` | Sets AC output power limit to 2 500 W. |
