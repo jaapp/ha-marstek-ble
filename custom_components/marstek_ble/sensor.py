@@ -32,6 +32,7 @@ VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
 # Keep verbose logs isolated unless explicitly enabled via logger config.
 VERBOSE_LOGGER.propagate = False
 VERBOSE_LOGGER.setLevel(logging.INFO)
+STALE_AFTER_SECONDS = 10 * 60
 
 
 async def async_setup_entry(
@@ -109,6 +110,7 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
+            stale_fields=["battery_voltage", "battery_current"],
         ),
         MarstekSensor(
             coordinator,
@@ -143,6 +145,7 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
+            stale_fields=["battery_voltage", "battery_current"],
         ),
         MarstekSensor(
             coordinator,
@@ -157,6 +160,7 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
+            stale_fields=["battery_voltage", "battery_current"],
         ),
         MarstekSensor(
             coordinator,
@@ -252,6 +256,7 @@ async def async_setup_entry(
             UnitOfEnergy.WATT_HOUR,
             SensorDeviceClass.ENERGY_STORAGE,
             SensorStateClass.MEASUREMENT,
+            stale_fields=["battery_soc", "design_capacity"],
         ),
         MarstekSensor(
             coordinator,
@@ -266,6 +271,7 @@ async def async_setup_entry(
             UnitOfEnergy.WATT_HOUR,
             SensorDeviceClass.ENERGY_STORAGE,
             SensorStateClass.MEASUREMENT,
+            stale_fields=["battery_soc", "design_capacity"],
         ),
         # Temperature sensors
         MarstekSensor(
@@ -522,6 +528,7 @@ async def async_setup_entry(
                     and data.battery_voltage * data.battery_current < -5
                     else "inactive"
                 ),
+                stale_fields=["battery_voltage", "battery_current"],
             ),
             MarstekTextSensor(
                 coordinator,
@@ -648,10 +655,12 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
         state_class: SensorStateClass | None,
         entity_category: EntityCategory | None = None,
         suggested_display_precision: int | None = None,
+        stale_fields: list[str] | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._key = key
+        self._stale_fields = stale_fields or [key]
         self._attr_name = name
         self._attr_has_entity_name = True
         self._value_fn = value_fn
@@ -666,7 +675,7 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data with telemetry for debugging staleness."""
         value = self.native_value
-        meta = self.coordinator.data.get_field_metadata(self._key)
+        meta = self._get_representative_metadata()
         VERBOSE_LOGGER.debug(
             "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
             self.coordinator.device_name,
@@ -683,12 +692,41 @@ class MarstekSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return super().available and self.coordinator.data is not None
+        is_available = super().available and self.coordinator.data is not None
+        age = self._stale_age_seconds()
+        if age is not None and age > STALE_AFTER_SECONDS:
+            return False
+        return is_available
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
         return self._value_fn(self.coordinator.data)
+
+    def _stale_age_seconds(self) -> float | None:
+        """Return the oldest dependency age in seconds if available."""
+        if self.coordinator.data is None:
+            return None
+
+        ages: list[float] = []
+        for field in self._stale_fields:
+            meta = self.coordinator.data.get_field_metadata(field)
+            if not meta or meta.get("age_seconds") is None:
+                continue
+            ages.append(meta["age_seconds"])
+
+        return max(ages) if ages else None
+
+    def _get_representative_metadata(self) -> dict | None:
+        """Return metadata for logging from the first available field."""
+        if self.coordinator.data is None:
+            return None
+
+        for field in self._stale_fields:
+            meta = self.coordinator.data.get_field_metadata(field)
+            if meta:
+                return meta
+        return None
 
     @property
     def device_info(self):
@@ -713,10 +751,12 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
         name: str,
         value_fn,
         entity_category: EntityCategory | None = None,
+        stale_fields: list[str] | None = None,
     ) -> None:
         """Initialize the text sensor."""
         super().__init__(coordinator)
         self._key = key
+        self._stale_fields = stale_fields or [key]
         self._attr_name = name
         self._attr_has_entity_name = True
         self._value_fn = value_fn
@@ -726,7 +766,7 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data with telemetry for debugging staleness."""
         value = self.native_value
-        meta = self.coordinator.data.get_field_metadata(self._key)
+        meta = self._get_representative_metadata()
         VERBOSE_LOGGER.debug(
             "[%s/%s] Sensor update %s=%s (source=%s ts=%s age=%.1fs payload=%s)",
             self.coordinator.device_name,
@@ -743,13 +783,42 @@ class MarstekTextSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return super().available and self.coordinator.data is not None
+        is_available = super().available and self.coordinator.data is not None
+        age = self._stale_age_seconds()
+        if age is not None and age > STALE_AFTER_SECONDS:
+            return False
+        return is_available
 
     @property
     def native_value(self):
         """Return the state of the sensor."""
         value = self._value_fn(self.coordinator.data)
         return str(value) if value is not None else None
+
+    def _stale_age_seconds(self) -> float | None:
+        """Return the oldest dependency age in seconds if available."""
+        if self.coordinator.data is None:
+            return None
+
+        ages: list[float] = []
+        for field in self._stale_fields:
+            meta = self.coordinator.data.get_field_metadata(field)
+            if not meta or meta.get("age_seconds") is None:
+                continue
+            ages.append(meta["age_seconds"])
+
+        return max(ages) if ages else None
+
+    def _get_representative_metadata(self) -> dict | None:
+        """Return metadata for logging from the first available field."""
+        if self.coordinator.data is None:
+            return None
+
+        for field in self._stale_fields:
+            meta = self.coordinator.data.get_field_metadata(field)
+            if meta:
+                return meta
+        return None
 
     @property
     def device_info(self):
