@@ -71,9 +71,7 @@ def _coordinator_diagnostics(coordinator: MarstekDataUpdateCoordinator) -> dict[
             "active_update_interval_seconds": update_interval,
             "fast_poll_count": coordinator._fast_poll_count,  # pylint: disable=protected-access
             "medium_poll_count": coordinator._medium_poll_count,  # pylint: disable=protected-access
-            "slow_poll_count": coordinator._slow_poll_count,  # pylint: disable=protected-access
             "medium_poll_cycle": coordinator._medium_poll_cycle,  # pylint: disable=protected-access
-            "slow_poll_cycle": coordinator._slow_poll_cycle,  # pylint: disable=protected-access
         },
         "device_connected": device_diag.get("connected"),
         "coordinator_data": _dataclass_to_dict(coordinator.data),
