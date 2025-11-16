@@ -23,6 +23,15 @@ DEFAULT_POLL_INTERVAL = UPDATE_INTERVAL_FAST
 MIN_POLL_INTERVAL = 1
 MAX_POLL_INTERVAL = 60
 
+# Backoff intervals (seconds) applied after successive failures.
+BACKOFF_INTERVALS = (
+    UPDATE_INTERVAL_FAST,  # Baseline (no backoff)
+    5,
+    15,
+    30,
+    60,
+)
+
 # Command codes
 CMD_RUNTIME_INFO = 0x03
 CMD_DEVICE_INFO = 0x04

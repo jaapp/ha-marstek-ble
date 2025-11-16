@@ -34,8 +34,7 @@ from .const import (
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
     CMD_WIFI_SSID,
-    CMD_DEVICE_INFO,
-    CMD_LOCAL_API_STATUS,
+    BACKOFF_INTERVALS,
     DEFAULT_POLL_INTERVAL,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
@@ -93,6 +92,8 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._time_poll_unsub: asyncio.TimerHandle | None = None
         self._poll_lock = asyncio.Lock()
         self._initial_poll_done = False
+        self._backoff_level = 0
+        self._default_poll_interval = self._poll_interval
         self._update_poll_schedule()
 
         # Create persistent device object for command sending (SwitchBot pattern)
@@ -320,6 +321,8 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         duration = time.monotonic() - start_monotonic
         self._last_poll_completed_at = time.time()
         self._initial_poll_done = True
+        had_failure = any(not c["success"] for c in self._current_poll_commands)
+        self._handle_backoff(had_failure)
         _LOGGER.debug(
             "[%s/%s] Poll cycle end in %.3fs (commands=%s)",
             self.device_name,
@@ -331,6 +334,32 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             ],
         )
         return self.data
+
+    def _handle_backoff(self, had_failure: bool) -> None:
+        """Adjust polling interval based on recent failures."""
+        if had_failure:
+            if self._backoff_level < len(BACKOFF_INTERVALS) - 1:
+                self._backoff_level += 1
+            new_interval = BACKOFF_INTERVALS[self._backoff_level]
+            if new_interval != self._poll_interval:
+                _LOGGER.info(
+                    "[%s/%s] Increasing poll interval to %ss after failure (backoff level %s)",
+                    self.device_name,
+                    self.address,
+                    new_interval,
+                    self._backoff_level,
+                )
+                self.set_poll_interval(new_interval)
+        elif self._backoff_level > 0:
+            self._backoff_level = 0
+            if self._poll_interval != self._default_poll_interval:
+                _LOGGER.info(
+                    "[%s/%s] Resetting poll interval to %ss after successful poll",
+                    self.device_name,
+                    self.address,
+                    self._default_poll_interval,
+                )
+                self.set_poll_interval(self._default_poll_interval)
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
