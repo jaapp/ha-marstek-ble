@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CMD_AC_POWER,
+    CMD_ADAPTIVE_MODE,
     CMD_POWER_MODE,
     CMD_REBOOT,
     CMD_TOTAL_POWER,
