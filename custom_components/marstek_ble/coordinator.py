@@ -48,6 +48,9 @@ VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
 VERBOSE_LOGGER.propagate = False
 VERBOSE_LOGGER.setLevel(logging.INFO)
 
+_GLOBAL_BACKOFF_LEVEL: int = 0
+_GLOBAL_BACKOFF_UNTIL: float | None = None
+
 
 class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     """Class to manage fetching Marstek data from BLE device."""
@@ -89,8 +92,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._time_poll_unsub: asyncio.TimerHandle | None = None
         self._poll_lock = asyncio.Lock()
         self._initial_poll_done = False
-        self._backoff_level = 0
-        self._backoff_until: float | None = None
         self._update_poll_schedule()
 
         # Create persistent device object for command sending (SwitchBot pattern)
@@ -273,10 +274,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
     ) -> MarstekData:
         """Shared poll execution path (used by event and timer triggers)."""
         now = time.time()
-        if self._backoff_until and now < self._backoff_until:
-            remaining = self._backoff_until - now
+        if _GLOBAL_BACKOFF_UNTIL and now < _GLOBAL_BACKOFF_UNTIL:
+            remaining = _GLOBAL_BACKOFF_UNTIL - now
             _LOGGER.warning(
-                "[%s/%s] Backoff active; skipping poll with %0.1fs remaining",
+                "[%s/%s] Backoff active (global); skipping poll with %0.1fs remaining",
                 self.device_name,
                 self.address,
                 remaining,
@@ -335,26 +336,27 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     def _handle_backoff(self, had_failure: bool) -> None:
         """Apply global backoff by pausing all polling for a window."""
+        global _GLOBAL_BACKOFF_LEVEL, _GLOBAL_BACKOFF_UNTIL
         if had_failure:
-            if self._backoff_level < len(BACKOFF_INTERVALS) - 1:
-                self._backoff_level += 1
-            backoff_seconds = BACKOFF_INTERVALS[self._backoff_level]
-            self._backoff_until = time.time() + backoff_seconds
+            if _GLOBAL_BACKOFF_LEVEL < len(BACKOFF_INTERVALS) - 1:
+                _GLOBAL_BACKOFF_LEVEL += 1
+            backoff_seconds = BACKOFF_INTERVALS[_GLOBAL_BACKOFF_LEVEL]
+            _GLOBAL_BACKOFF_UNTIL = time.time() + backoff_seconds
             _LOGGER.warning(
-                "[%s/%s] Entering backoff level %s; pausing all polls for %ss",
+                "[%s/%s] Entering GLOBAL backoff level %s; pausing all polls for %ss",
                 self.device_name,
                 self.address,
-                self._backoff_level,
+                _GLOBAL_BACKOFF_LEVEL,
                 backoff_seconds,
             )
-        elif self._backoff_level > 0 or self._backoff_until:
+        elif _GLOBAL_BACKOFF_LEVEL > 0 or _GLOBAL_BACKOFF_UNTIL:
             _LOGGER.info(
-                "[%s/%s] Backoff cleared after successful poll",
+                "[%s/%s] GLOBAL backoff cleared after successful poll",
                 self.device_name,
                 self.address,
             )
-            self._backoff_level = 0
-            self._backoff_until = None
+            _GLOBAL_BACKOFF_LEVEL = 0
+            _GLOBAL_BACKOFF_UNTIL = None
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
