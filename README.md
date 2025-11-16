@@ -117,14 +117,11 @@ Entity IDs use your device slug—replace `<device>` with your device name (e.g.
 
 ### Energy dashboard sensors
 
-The integration also exposes four helper sensors you can add directly to the Home Assistant Energy Dashboard:
+Add the cumulative totals to Home Assistant's Energy Dashboard using your device slug:
+- `sensor.<device>_total_energy_charged` → Battery energy in
+- `sensor.<device>_total_energy_discharged` → Battery energy out
 
-- `Battery Energy In`
-- `Battery Energy Out`
-- `Daily Battery Energy In`
-- `Daily Battery Energy Out`
-
-For long-term energy accounting in the Energy Dashboard, use the cumulative sensors `sensor.<device>_total_energy_charged` (e.g., `51.51 kWh`) and `sensor.<device>_total_energy_discharged` (e.g., `41.07 kWh`) as your battery's energy in/out sources.
+These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the recommended sources for long-term battery accounting.
 
 ## Supported Devices
 
