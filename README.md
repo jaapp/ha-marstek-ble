@@ -54,47 +54,47 @@ Entity IDs use your device slug—replace `<device>` with your device name (e.g.
 
 | Entity ID (example) | Example value | Polling tier (s) |
 | --- | --- | --- |
-| `sensor.<device>_battery_voltage` | 50.93 V | fast (1) |
-| `sensor.<device>_battery_current` | -2.9 A | fast (1) |
-| `sensor.<device>_battery_soc` | 17.0 % | fast (1) |
+| `sensor.<device>_battery_voltage` | 48.45 V | fast (1) |
+| `sensor.<device>_battery_current` | 0.0 A | fast (1) |
+| `sensor.<device>_battery_soc` | 11.0 % | fast (1) |
 | `sensor.<device>_battery_soh` | 99.0 % | fast (1) |
 | `sensor.<device>_battery_temperature` | 16.0 °C | fast (1) |
-| `sensor.<device>_battery_power` | -147.697 W | fast (1) |
+| `sensor.<device>_battery_power` | 0.0 W | fast (1) |
 | `sensor.<device>_battery_power_in` | 0 W | fast (1) |
-| `sensor.<device>_battery_power_out` | 147.697 W | fast (1) |
+| `sensor.<device>_battery_power_out` | 0 W | fast (1) |
 | `sensor.<device>_output_1_power` | 0.0 W | fast (1) |
 | `sensor.<device>_design_capacity` | 5120.0 Wh | fast (1) |
-| `sensor.<device>_remaining_capacity` | 870.4 Wh | fast (1) |
-| `sensor.<device>_available_capacity` | 4249.6 Wh | fast (1) |
+| `sensor.<device>_remaining_capacity` | 563.2 Wh | fast (1) |
+| `sensor.<device>_available_capacity` | 4556.8 Wh | fast (1) |
 | `sensor.<device>_temperature_low` | 0.0 °C | fast (1) |
 | `sensor.<device>_temperature_high` | 0.0 °C | fast (1) |
-| `sensor.<device>_cell_1_voltage` | 3.184 V | fast (1) |
-| `sensor.<device>_cell_2_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_3_voltage` | 3.182 V | fast (1) |
-| `sensor.<device>_cell_4_voltage` | 3.184 V | fast (1) |
-| `sensor.<device>_cell_5_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_6_voltage` | 3.184 V | fast (1) |
-| `sensor.<device>_cell_7_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_8_voltage` | 3.185 V | fast (1) |
-| `sensor.<device>_cell_9_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_10_voltage` | 3.182 V | fast (1) |
-| `sensor.<device>_cell_11_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_12_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_13_voltage` | 3.182 V | fast (1) |
-| `sensor.<device>_cell_14_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_15_voltage` | 3.183 V | fast (1) |
-| `sensor.<device>_cell_16_voltage` | 3.18 V | fast (1) |
-| `sensor.<device>_battery_state` | discharging | fast (1) |
+| `sensor.<device>_cell_1_voltage` | 3.030 V | fast (1) |
+| `sensor.<device>_cell_2_voltage` | 3.037 V | fast (1) |
+| `sensor.<device>_cell_3_voltage` | 3.026 V | fast (1) |
+| `sensor.<device>_cell_4_voltage` | 3.034 V | fast (1) |
+| `sensor.<device>_cell_5_voltage` | 3.025 V | fast (1) |
+| `sensor.<device>_cell_6_voltage` | 3.022 V | fast (1) |
+| `sensor.<device>_cell_7_voltage` | 3.028 V | fast (1) |
+| `sensor.<device>_cell_8_voltage` | 3.034 V | fast (1) |
+| `sensor.<device>_cell_9_voltage` | 3.021 V | fast (1) |
+| `sensor.<device>_cell_10_voltage` | 3.031 V | fast (1) |
+| `sensor.<device>_cell_11_voltage` | 3.028 V | fast (1) |
+| `sensor.<device>_cell_12_voltage` | 3.035 V | fast (1) |
+| `sensor.<device>_cell_13_voltage` | 3.020 V | fast (1) |
+| `sensor.<device>_cell_14_voltage` | 3.027 V | fast (1) |
+| `sensor.<device>_cell_15_voltage` | 3.033 V | fast (1) |
+| `sensor.<device>_cell_16_voltage` | 3.025 V | fast (1) |
+| `sensor.<device>_battery_state` | inactive | fast (1) |
 | `sensor.<device>_system_status` | 1 | medium (~60) |
-| `sensor.<device>_config_mode` | 116 | medium (~60) |
+| `sensor.<device>_config_mode` | 100 | medium (~60) |
 | `sensor.<device>_ct_polling_rate` | 119 | medium (~60) |
-| `sensor.<device>_wifi_ssid` | (unknown) | medium (~60) |
-| `sensor.<device>_network_info` | ip:192.168.7.183,gate:192.168.7.1,mask:255.255.255.0,dns:192.168.7.1 | medium (~60) |
+| `sensor.<device>_wifi_ssid` | ExampleWiFi | medium (~60) |
+| `sensor.<device>_network_info` | ip:192.168.50.120,gate:192.168.50.1,mask:255.255.255.0,dns:192.168.50.1 | medium (~60) |
 | `sensor.<device>_meter_ip` | (not set) | medium (~60) |
-| `sensor.<device>_device_type` | (unknown) | medium (~60) |
-| `sensor.<device>_device_id` | (unknown) | medium (~60) |
-| `sensor.<device>_mac_address` | (unknown) | medium (~60) |
-| `sensor.<device>_firmware_version` | (unknown) | medium (~60) |
+| `sensor.<device>_device_type` | HMG-50 | medium (~60) |
+| `sensor.<device>_device_id` | ABCD1234567890 | medium (~60) |
+| `sensor.<device>_mac_address` | 00:11:22:33:44:55 | medium (~60) |
+| `sensor.<device>_firmware_version` | 202409090159 | medium (~60) |
 
 ### Energy dashboard sensors
 
