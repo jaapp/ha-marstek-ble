@@ -1,20 +1,18 @@
-name: Release Validation & Creation
+name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-  release:
-    types:
-      - published
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (without leading v)"
+        required: true
 
 permissions:
-  contents: write  # needed for creating releases and updating tags
+  contents: write  # needed for pushes and release creation
 
 jobs:
-  sync-manifest-version:
-    name: Sync Manifest Version with Tag
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+  cut-release:
+    name: Bump manifest, tag, and create draft release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -23,142 +21,55 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure Git
+      - name: Prepare
+        id: prep
         run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          MANIFEST_FILE="custom_components/marstek_ble/manifest.json"
+
+          git checkout "${DEFAULT_BRANCH}"
+          git pull --ff-only origin "${DEFAULT_BRANCH}"
+
+          if [ -z "${VERSION}" ]; then
+            echo "Version input is required." >&2
+            exit 1
+          fi
+
+          if [[ "${VERSION}" == v* ]]; then
+            echo "Provide the version without the leading 'v' (got ${VERSION})." >&2
+            exit 1
+          fi
+
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists." >&2
+            exit 1
+          fi
+
+          jq --arg v "${VERSION}" '.version = $v' "${MANIFEST_FILE}" > "${MANIFEST_FILE}.tmp"
+          mv "${MANIFEST_FILE}.tmp" "${MANIFEST_FILE}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update manifest version
-        id: update
-        shell: bash
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "default_branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit manifest bump and tag
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          TRIMMED_TAG="${TAG_NAME#v}"
-          MANIFEST_FILE="custom_components/marstek_ble/manifest.json"
-          CURRENT_VERSION=$(jq -r '.version' "$MANIFEST_FILE")
+          VERSION="${{ steps.prep.outputs.version }}"
+          DEFAULT_BRANCH="${{ steps.prep.outputs.default_branch }}"
 
-          echo "Tag: ${TAG_NAME}"
-          echo "Target version: ${TRIMMED_TAG}"
-          echo "Current manifest version: ${CURRENT_VERSION}"
-
-          if [ "${CURRENT_VERSION}" = "${TRIMMED_TAG}" ]; then
-            echo "Manifest version already matches tag. No update needed."
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Updating manifest version from ${CURRENT_VERSION} to ${TRIMMED_TAG}"
-            jq --arg version "${TRIMMED_TAG}" '.version = $version' "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp"
-            mv "${MANIFEST_FILE}.tmp" "$MANIFEST_FILE"
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit and update tag
-        if: steps.update.outputs.updated == 'true'
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          TRIMMED_TAG="${TAG_NAME#v}"
-
-          # Commit the manifest change
           git add custom_components/marstek_ble/manifest.json
-          git commit -m "chore: bump version to ${TRIMMED_TAG}"
+          git commit -m "chore: release v${VERSION}"
+          git tag "v${VERSION}"
 
-          # Determine the base branch (the branch the tag was likely created from)
-          # First, try to find branches that contain the parent commit
-          PARENT_COMMIT=$(git rev-parse HEAD~1)
-          BRANCHES=$(git branch -r --contains "${PARENT_COMMIT}" | grep -v HEAD | sed 's/origin\///' | tr -d ' ')
+          git push origin HEAD:"refs/heads/${DEFAULT_BRANCH}"
+          git push origin "v${VERSION}"
 
-          # Prefer main or master if available, otherwise use the first branch found
-          if echo "$BRANCHES" | grep -q "^main$"; then
-            BASE_BRANCH="main"
-          elif echo "$BRANCHES" | grep -q "^master$"; then
-            BASE_BRANCH="master"
-          elif [ -n "$BRANCHES" ]; then
-            BASE_BRANCH=$(echo "$BRANCHES" | head -n1)
-          else
-            # Fallback to default branch
-            BASE_BRANCH="${{ github.event.repository.default_branch }}"
-          fi
-
-          echo "Pushing commit to branch: ${BASE_BRANCH}"
-          git push origin HEAD:refs/heads/${BASE_BRANCH}
-
-          # Delete and recreate the tag at the new commit
-          git tag -d "${TAG_NAME}"
-          git tag "${TAG_NAME}"
-          git push origin "${TAG_NAME}" --force
-
-          echo "Successfully updated manifest version to ${TRIMMED_TAG} and moved tag ${TAG_NAME}"
-
-  manifest-version:
-    name: Verify Manifest Version
-    needs: sync-manifest-version
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Fetch latest tags
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        run: |
-          git fetch --tags --force
-          git checkout ${{ github.ref_name }}
-
-      - name: Determine release tag
-        id: tag
-        shell: bash
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          elif [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unsupported event type: ${GITHUB_EVENT_NAME}" >&2
-            exit 1
-          fi
-
-      - name: Ensure manifest version matches release tag
-        shell: bash
-        run: |
-          TAG_NAME="${{ steps.tag.outputs.tag }}"
-          if [ -z "${TAG_NAME}" ]; then
-            echo "Failed to determine release tag."
-            exit 1
-          fi
-
-          TRIMMED_TAG="${TAG_NAME#v}"
-          MANIFEST_VERSION=$(jq -r '.version' custom_components/marstek_ble/manifest.json)
-
-          echo "Tag: ${TAG_NAME}"
-          echo "Manifest version: ${MANIFEST_VERSION}"
-
-          if [ "${MANIFEST_VERSION}" != "${TRIMMED_TAG}" ]; then
-            echo "Manifest version must match the release tag (without leading 'v')."
-            exit 1
-          fi
-
-  create-release:
-    name: Create GitHub Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: manifest-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Fetch latest tags
-        run: |
-          git fetch --tags --force
-          git checkout ${{ github.ref_name }}
-
-      - name: Create Release
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: "v${{ steps.prep.outputs.version }}"
           generate_release_notes: true
+          draft: true
