@@ -45,6 +45,7 @@ from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
 _LOGGER = logging.getLogger(__name__)
 VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+# Keep verbose logs isolated unless explicitly enabled via logger config.
 VERBOSE_LOGGER.propagate = False
 VERBOSE_LOGGER.setLevel(logging.INFO)
 
@@ -132,7 +133,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
                 "error": str(error) if error else None,
             }
             self._current_poll_commands.append(cmd_entry)
-            _LOGGER.debug(
+            VERBOSE_LOGGER.debug(
                 "[%s/%s] Poll command 0x%02X %s in %.3fs (payload=%s)",
                 self.device_name,
                 self.address,
@@ -231,7 +232,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             else None
         )
 
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "_needs_poll called: ble_device=%s, seconds_since_last_poll=%s, last_poll_age=%.1f, interval=%ss, needs_poll=%s",
             ble_device is not None,
             seconds_since_last_poll,
@@ -289,7 +290,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._last_poll_started_at = wall_start
         self._current_poll_commands = []
         self._last_service_info = service_info
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Poll cycle start (interval=%ss, since_last=%.1fs) from %s",
             self.device_name,
             self.address,
@@ -322,7 +323,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._initial_poll_done = True
         had_failure = any(not c["success"] for c in self._current_poll_commands)
         self._handle_backoff(had_failure)
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Poll cycle end in %.3fs (commands=%s)",
             self.device_name,
             self.address,
@@ -360,7 +361,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
     async def _poll_fast(self) -> None:
         """Poll fast-update data (runtime info, BMS)."""
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Polling fast data - coordinator.data before: battery_voltage=%s, battery_soc=%s",
             self.device_name,
             self.address,
@@ -374,7 +375,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # BMS data - now waits for actual response
         await self._safe_send_and_sleep(CMD_BMS_DATA, delay=0.1)
 
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Polling fast data - coordinator.data after: battery_voltage=%s, battery_soc=%s",
             self.device_name,
             self.address,
@@ -423,7 +424,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             sender,
             raw_data.hex()
         )
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Data before parsing: battery_voltage=%s, battery_soc=%s",
             self.device_name,
             self.address,
@@ -434,7 +435,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         result = self._protocol.parse_notification(raw_data, self.data)
         self.device.record_notification(sender, raw_data, result)
 
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "[%s/%s] Parse result for cmd=%s: %s, data after parsing: battery_voltage=%s, battery_soc=%s",
             self.device_name,
             self.address,
@@ -473,8 +474,11 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         change: bluetooth.BluetoothChange,
     ) -> None:
         """Handle a Bluetooth event."""
-        _LOGGER.debug("_async_handle_bluetooth_event called: device=%s, change=%s",
-                     service_info.device.address, change)
+        VERBOSE_LOGGER.debug(
+            "_async_handle_bluetooth_event called: device=%s, change=%s",
+            service_info.device.address,
+            change,
+        )
 
         self.ble_device = service_info.device
 

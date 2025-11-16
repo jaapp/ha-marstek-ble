@@ -16,6 +16,7 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 _LOGGER = logging.getLogger(__name__)
 VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+# Keep verbose logs isolated unless explicitly enabled via logger config.
 VERBOSE_LOGGER.propagate = False
 VERBOSE_LOGGER.setLevel(logging.INFO)
 DEVICE_DEBUG = logging.getLogger(f"{__name__}.device")
@@ -216,7 +217,7 @@ class MarstekProtocol:
         payload_len = len(payload)
         timestamp = time.time()
 
-        _LOGGER.debug("Parsing cmd 0x%02X, payload length %d", cmd, payload_len)
+        VERBOSE_LOGGER.debug("Parsing cmd 0x%02X, payload length %d", cmd, payload_len)
 
         try:
             if cmd == 0x03:  # Runtime info
@@ -242,7 +243,7 @@ class MarstekProtocol:
             elif cmd == 0x28:  # Local API status
                 return MarstekProtocol._parse_local_api_status(payload, device_data, timestamp)
             else:
-                _LOGGER.debug("Unhandled cmd 0x%02X", cmd)
+                VERBOSE_LOGGER.debug("Unhandled cmd 0x%02X", cmd)
                 return False
 
         except Exception as e:
@@ -261,7 +262,7 @@ class MarstekProtocol:
 
         # Short format (37 bytes) - older firmware or different model
         if len(payload) < 60:
-            _LOGGER.debug("Parsing short runtime info format (%d bytes)", len(payload))
+            VERBOSE_LOGGER.debug("Parsing short runtime info format (%d bytes)", len(payload))
             # Try to extract what we can from the shorter format
             # Based on observed data, the short format has limited fields
             try:
@@ -359,7 +360,7 @@ class MarstekProtocol:
                 device_data, field, 0x03, timestamp, payload
             )
 
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "Runtime data parsed (cmd=0x03): power=%sW wifi=%s mqtt=%s out1_active=%s temp_low/high=%s/%s grid=%sW solar=%sW",
             device_data.out1_power,
             device_data.wifi_connected,
@@ -554,7 +555,7 @@ class MarstekProtocol:
         cell_min = min(cells) if cells else None
         cell_max = max(cells) if cells else None
         cell_avg = sum(cells) / len(cells) if cells else None
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "BMS parsed (cmd=0x14): V=%sV I=%sA SOC=%s%% SOH=%s%% cells(min/max/avg)=%s/%s/%s runtime=%sh",
             device_data.battery_voltage,
             device_data.battery_current,
@@ -753,7 +754,7 @@ class MarstekBLEDevice:
     async def _ensure_connected(self) -> None:
         """Ensure we have an active BLE connection."""
         if self._client and self._client.is_connected:
-            _LOGGER.debug("%s: Already connected", self._device_name)
+            VERBOSE_LOGGER.debug("%s: Already connected", self._device_name)
             return
 
         async with self._connect_lock:
@@ -833,7 +834,7 @@ class MarstekBLEDevice:
         self._disconnect_timer = loop.call_later(
             30.0, lambda: asyncio.create_task(self._execute_disconnect())
         )
-        _LOGGER.debug(
+        VERBOSE_LOGGER.debug(
             "%s: Scheduled inactivity disconnect in 30s (last_command_age=%.1fs)",
             self._device_name,
             time.time() - self._last_command_time if self._last_command_time else -1,
@@ -913,7 +914,7 @@ class MarstekBLEDevice:
                     try:
                         await asyncio.wait_for(self._response_event.wait(), timeout=2.0)
                         response_received = True
-                        _LOGGER.debug(
+                        VERBOSE_LOGGER.debug(
                             "%s: Command 0x%02X sent and response received",
                             self._device_name,
                             cmd
@@ -937,7 +938,7 @@ class MarstekBLEDevice:
                         success=response_received,
                         error=None if response_received else "no_response",
                     )
-                    _LOGGER.debug(
+                    VERBOSE_LOGGER.debug(
                         "%s: Command 0x%02X %s in %.3fs after %d attempt(s)",
                         self._device_name,
                         cmd,

@@ -29,6 +29,7 @@ from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 VERBOSE_LOGGER = logging.getLogger(f"{__name__}.verbose")
+# Keep verbose logs isolated unless explicitly enabled via logger config.
 VERBOSE_LOGGER.propagate = False
 VERBOSE_LOGGER.setLevel(logging.INFO)
 
