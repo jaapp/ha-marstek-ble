@@ -39,12 +39,26 @@ class MarstekData:
     mqtt_connected: bool | None = None
     out1_active: bool | None = None
     extern1_connected: bool | None = None
+    # Runtime info (0x03) - additional fields
+    grid_power: float | None = None  # Backup power (signed, watts)
+    solar_power: float | None = None  # Battery power (signed, watts)
+    work_mode: int | None = None  # Operating mode (0-7)
+    product_code: int | None = None  # Model identification
+    power_rating: int | None = None  # System power capacity (watts)
+    daily_energy_charged: float | None = None  # kWh
+    daily_energy_discharged: float | None = None  # kWh
+    monthly_energy_charged: float | None = None  # kWh
+    monthly_energy_discharged: float | None = None  # kWh
+    total_energy_charged: float | None = None  # kWh
+    total_energy_discharged: float | None = None  # kWh
 
     # Device info (0x04)
     device_type: str | None = None
     device_id: str | None = None
+    serial_number: str | None = None
     mac_address: str | None = None
     firmware_version: str | None = None
+    hardware_version: str | None = None
 
     # WiFi SSID (0x08)
     wifi_ssid: str | None = None
@@ -70,6 +84,19 @@ class MarstekData:
     battery_current: float | None = None
     battery_temp: float | None = None
     cell_voltages: list[float | None] = field(default_factory=lambda: [None] * 16)
+    # BMS data (0x14) - additional fields
+    bms_version: int | None = None
+    voltage_limit: float | None = None  # V
+    charge_current_limit: float | None = None  # A
+    discharge_current_limit: float | None = None  # A
+    error_code: int | None = None
+    warning_code: int | None = None
+    runtime_hours: float | None = None  # hours
+    mosfet_temp: float | None = None  # °C
+    temp_sensor_1: float | None = None  # °C
+    temp_sensor_2: float | None = None  # °C
+    temp_sensor_3: float | None = None  # °C
+    temp_sensor_4: float | None = None  # °C
 
     # Config data (0x1A)
     config_mode: int | None = None
@@ -84,6 +111,10 @@ class MarstekData:
 
     # Network info (0x24)
     network_info: str | None = None
+    ip_address: str | None = None
+    gateway: str | None = None
+    subnet_mask: str | None = None
+    dns_server: str | None = None
 
     # Local API status (0x28)
     local_api_status: str | None = None
@@ -273,6 +304,48 @@ class MarstekProtocol:
         device_data.out1_active = payload[16] != 0
         device_data.extern1_connected = payload[28] != 0
 
+        # Parse additional fields if payload is long enough (100+ bytes)
+        if len(payload) >= 100:
+            # Grid/backup power (signed) at offset 0x00
+            device_data.grid_power = float(struct.unpack("<h", payload[0:2])[0])
+            # Solar/battery power (signed) at offset 0x02
+            device_data.solar_power = float(struct.unpack("<h", payload[2:4])[0])
+            # Work mode at offset 0x04
+            device_data.work_mode = int(payload[4])
+            # Product code at offset 0x0C
+            device_data.product_code = int(struct.unpack("<H", payload[12:14])[0])
+            # Daily charge at offset 0x0E (÷100 for kWh)
+            device_data.daily_energy_charged = struct.unpack("<I", payload[14:18])[0] / 100.0
+            # Monthly charge at offset 0x12 (÷1000 for kWh)
+            device_data.monthly_energy_charged = struct.unpack("<I", payload[18:22])[0] / 1000.0
+            # Daily discharge at offset 0x16 (÷100 for kWh)
+            device_data.daily_energy_discharged = struct.unpack("<I", payload[22:26])[0] / 100.0
+            # Monthly discharge at offset 0x1A (÷100 for kWh)
+            device_data.monthly_energy_discharged = struct.unpack("<I", payload[26:30])[0] / 100.0
+            # Total charge at offset 0x29 (÷100 for kWh)
+            device_data.total_energy_charged = struct.unpack("<I", payload[41:45])[0] / 100.0
+            # Total discharge at offset 0x2D (÷100 for kWh)
+            device_data.total_energy_discharged = struct.unpack("<I", payload[45:49])[0] / 100.0
+            # Power rating at offset 0x4A
+            device_data.power_rating = int(struct.unpack("<H", payload[74:76])[0])
+
+            for field in (
+                "grid_power",
+                "solar_power",
+                "work_mode",
+                "product_code",
+                "daily_energy_charged",
+                "monthly_energy_charged",
+                "daily_energy_discharged",
+                "monthly_energy_discharged",
+                "total_energy_charged",
+                "total_energy_discharged",
+                "power_rating",
+            ):
+                MarstekProtocol._track_field(
+                    device_data, field, 0x03, timestamp, payload
+                )
+
         for field in (
             "out1_power",
             "temp_low",
@@ -287,13 +360,15 @@ class MarstekProtocol:
             )
 
         _LOGGER.debug(
-            "Runtime data parsed (cmd=0x03): power=%sW wifi=%s mqtt=%s out1_active=%s temp_low/high=%s/%s",
+            "Runtime data parsed (cmd=0x03): power=%sW wifi=%s mqtt=%s out1_active=%s temp_low/high=%s/%s grid=%sW solar=%sW",
             device_data.out1_power,
             device_data.wifi_connected,
             device_data.mqtt_connected,
             device_data.out1_active,
             device_data.temp_low,
             device_data.temp_high,
+            device_data.grid_power,
+            device_data.solar_power,
         )
 
         return True
@@ -319,12 +394,16 @@ class MarstekProtocol:
                     device_data.device_type = value
                 elif key == "id":
                     device_data.device_id = value
+                elif key == "sn":
+                    device_data.serial_number = value
                 elif key == "mac":
                     device_data.mac_address = value
-                elif key in ("dev_ver", "fc_ver"):
+                elif key in ("dev_ver", "fc_ver", "fw"):
                     device_data.firmware_version = value
+                elif key == "hw":
+                    device_data.hardware_version = value
 
-            for field in ("device_type", "device_id", "mac_address", "firmware_version"):
+            for field in ("device_type", "device_id", "serial_number", "mac_address", "firmware_version", "hardware_version"):
                 if getattr(device_data, field) is not None:
                     MarstekProtocol._track_field(
                         device_data, field, 0x04, timestamp, payload
@@ -409,12 +488,33 @@ class MarstekProtocol:
         if len(payload) < 80:
             return False
 
+        # Parse BMS version
+        device_data.bms_version = int(struct.unpack("<H", payload[0:2])[0])
+        # Parse voltage and current limits
+        device_data.voltage_limit = struct.unpack("<H", payload[2:4])[0] / 10.0
+        device_data.charge_current_limit = struct.unpack("<H", payload[4:6])[0] / 10.0
+        device_data.discharge_current_limit = struct.unpack("<h", payload[6:8])[0] / 10.0
+        # Parse SOC, SOH, capacity
         device_data.battery_soc = float(struct.unpack("<H", payload[8:10])[0])
         device_data.battery_soh = float(struct.unpack("<H", payload[10:12])[0])
         device_data.design_capacity = float(struct.unpack("<H", payload[12:14])[0])
+        # Parse voltage, current, temperature
         device_data.battery_voltage = struct.unpack("<H", payload[14:16])[0] / 100.0
         device_data.battery_current = struct.unpack("<h", payload[16:18])[0] / 10.0
-        device_data.battery_temp = float(struct.unpack("<H", payload[40:42])[0])
+        device_data.battery_temp = float(struct.unpack("<H", payload[18:20])[0])
+        # Parse error and warning codes
+        device_data.error_code = int(struct.unpack("<H", payload[26:28])[0])
+        device_data.warning_code = int(struct.unpack("<I", payload[28:32])[0])
+        # Parse runtime (convert from ms to hours)
+        runtime_ms = struct.unpack("<I", payload[32:36])[0]
+        device_data.runtime_hours = runtime_ms / 3600000.0
+        # Parse MOSFET temperature
+        device_data.mosfet_temp = float(struct.unpack("<H", payload[38:40])[0])
+        # Parse temperature sensors 1-4
+        device_data.temp_sensor_1 = float(struct.unpack("<H", payload[40:42])[0])
+        device_data.temp_sensor_2 = float(struct.unpack("<H", payload[42:44])[0])
+        device_data.temp_sensor_3 = float(struct.unpack("<H", payload[44:46])[0])
+        device_data.temp_sensor_4 = float(struct.unpack("<H", payload[46:48])[0])
 
         # Parse cell voltages (16 cells starting at offset 48)
         for i in range(16):
@@ -427,12 +527,24 @@ class MarstekProtocol:
                 )
 
         for field in (
+            "bms_version",
+            "voltage_limit",
+            "charge_current_limit",
+            "discharge_current_limit",
             "battery_soc",
             "battery_soh",
             "design_capacity",
             "battery_voltage",
             "battery_current",
             "battery_temp",
+            "error_code",
+            "warning_code",
+            "runtime_hours",
+            "mosfet_temp",
+            "temp_sensor_1",
+            "temp_sensor_2",
+            "temp_sensor_3",
+            "temp_sensor_4",
         ):
             MarstekProtocol._track_field(
                 device_data, field, 0x14, timestamp, payload
@@ -443,7 +555,7 @@ class MarstekProtocol:
         cell_max = max(cells) if cells else None
         cell_avg = sum(cells) / len(cells) if cells else None
         _LOGGER.debug(
-            "BMS parsed (cmd=0x14): V=%sV I=%sA SOC=%s%% SOH=%s%% cells(min/max/avg)=%s/%s/%s",
+            "BMS parsed (cmd=0x14): V=%sV I=%sA SOC=%s%% SOH=%s%% cells(min/max/avg)=%s/%s/%s runtime=%sh",
             device_data.battery_voltage,
             device_data.battery_current,
             device_data.battery_soc,
@@ -451,6 +563,7 @@ class MarstekProtocol:
             cell_min,
             cell_max,
             cell_avg,
+            device_data.runtime_hours,
         )
 
         return True
@@ -512,12 +625,40 @@ class MarstekProtocol:
     def _parse_network_info(
         payload: bytes, device_data: MarstekData, timestamp: float
     ) -> bool:
-        """Parse network info (0x24)."""
+        """Parse network info (0x24).
+
+        Format: "ip:192.168.20.82,gate:192.168.20.1,mask:255.255.255.0,dns:192.168.20.1"
+        """
         try:
-            device_data.network_info = payload.decode("ascii", errors="ignore").strip()
-            MarstekProtocol._track_field(
-                device_data, "network_info", 0x24, timestamp, payload
-            )
+            network_str = payload.decode("ascii", errors="ignore").strip()
+            device_data.network_info = network_str
+
+            # Parse individual fields from comma-delimited string
+            if network_str:
+                pairs = network_str.split(",")
+                for pair in pairs:
+                    if ":" not in pair:
+                        continue
+
+                    key, value = pair.split(":", 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    if key == "ip":
+                        device_data.ip_address = value
+                    elif key in ("gate", "gateway"):
+                        device_data.gateway = value
+                    elif key == "mask":
+                        device_data.subnet_mask = value
+                    elif key == "dns":
+                        device_data.dns_server = value
+
+            for field in ("network_info", "ip_address", "gateway", "subnet_mask", "dns_server"):
+                if getattr(device_data, field) is not None:
+                    MarstekProtocol._track_field(
+                        device_data, field, 0x24, timestamp, payload
+                    )
+
             return True
         except Exception:
             return False
