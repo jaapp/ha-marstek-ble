@@ -50,60 +50,78 @@ Repeat for each battery you want to add.
 - **Fast (default 1s)**: Runtime info and BMS data; configurable in Options → Polling interval (clamped to 1–60s)
 - **Medium (~60s by default)**: System data, WiFi SSID, config, CT polling rate, meter IP, network info, device identity, timer info, logs; runs as a multiple of the fast interval
 
-Entity IDs use your device slug—replace `<device>` with your device name (e.g., `sensor.backup_battery_battery_voltage`):
+Entity IDs use your device slug—replace `<device>` with your device name (e.g., `sensor.backup_battery_battery_voltage`). Values below are sample values only—private identifiers (IP, MAC, serials) are intentionally omitted.
 
 | Entity ID (example) | Example value | Polling tier (s) |
 | --- | --- | --- |
-| `sensor.<device>_battery_voltage` | 48.45 V | fast (1) |
-| `sensor.<device>_battery_current` | 0.0 A | fast (1) |
-| `sensor.<device>_battery_soc` | 11.0 % | fast (1) |
+| `sensor.<device>_battery_voltage` | 50.37 V | fast (1) |
+| `sensor.<device>_battery_current` | -0.2 A | fast (1) |
+| `sensor.<device>_battery_soc` | 15.0 % | fast (1) |
 | `sensor.<device>_battery_soh` | 99.0 % | fast (1) |
-| `sensor.<device>_battery_temperature` | 16.0 °C | fast (1) |
-| `sensor.<device>_battery_power` | 0.0 W | fast (1) |
+| `sensor.<device>_battery_temperature` | 1.0 °C | fast (1) |
+| `sensor.<device>_battery_power` | -10.07 W | fast (1) |
 | `sensor.<device>_battery_power_in` | 0 W | fast (1) |
-| `sensor.<device>_battery_power_out` | 0 W | fast (1) |
+| `sensor.<device>_battery_power_out` | 10.07 W | fast (1) |
 | `sensor.<device>_output_1_power` | 0.0 W | fast (1) |
 | `sensor.<device>_design_capacity` | 5120.0 Wh | fast (1) |
-| `sensor.<device>_remaining_capacity` | 563.2 Wh | fast (1) |
-| `sensor.<device>_available_capacity` | 4556.8 Wh | fast (1) |
+| `sensor.<device>_remaining_capacity` | 768.0 Wh | fast (1) |
+| `sensor.<device>_available_capacity` | 4352.0 Wh | fast (1) |
 | `sensor.<device>_temperature_low` | 0.0 °C | fast (1) |
 | `sensor.<device>_temperature_high` | 0.0 °C | fast (1) |
-| `sensor.<device>_cell_1_voltage` | 3.030 V | fast (1) |
-| `sensor.<device>_cell_2_voltage` | 3.037 V | fast (1) |
-| `sensor.<device>_cell_3_voltage` | 3.026 V | fast (1) |
-| `sensor.<device>_cell_4_voltage` | 3.034 V | fast (1) |
-| `sensor.<device>_cell_5_voltage` | 3.025 V | fast (1) |
-| `sensor.<device>_cell_6_voltage` | 3.022 V | fast (1) |
-| `sensor.<device>_cell_7_voltage` | 3.028 V | fast (1) |
-| `sensor.<device>_cell_8_voltage` | 3.034 V | fast (1) |
-| `sensor.<device>_cell_9_voltage` | 3.021 V | fast (1) |
-| `sensor.<device>_cell_10_voltage` | 3.031 V | fast (1) |
-| `sensor.<device>_cell_11_voltage` | 3.028 V | fast (1) |
-| `sensor.<device>_cell_12_voltage` | 3.035 V | fast (1) |
-| `sensor.<device>_cell_13_voltage` | 3.020 V | fast (1) |
-| `sensor.<device>_cell_14_voltage` | 3.027 V | fast (1) |
-| `sensor.<device>_cell_15_voltage` | 3.033 V | fast (1) |
-| `sensor.<device>_cell_16_voltage` | 3.025 V | fast (1) |
-| `sensor.<device>_battery_state` | inactive | fast (1) |
+| `sensor.<device>_cell_1_voltage` | 3.148 V | fast (1) |
+| `sensor.<device>_cell_2_voltage` | 3.153 V | fast (1) |
+| `sensor.<device>_cell_3_voltage` | 3.146 V | fast (1) |
+| `sensor.<device>_cell_4_voltage` | 3.151 V | fast (1) |
+| `sensor.<device>_cell_5_voltage` | 3.148 V | fast (1) |
+| `sensor.<device>_cell_6_voltage` | 3.145 V | fast (1) |
+| `sensor.<device>_cell_7_voltage` | 3.148 V | fast (1) |
+| `sensor.<device>_cell_8_voltage` | 3.153 V | fast (1) |
+| `sensor.<device>_cell_9_voltage` | 3.144 V | fast (1) |
+| `sensor.<device>_cell_10_voltage` | 3.150 V | fast (1) |
+| `sensor.<device>_cell_11_voltage` | 3.148 V | fast (1) |
+| `sensor.<device>_cell_12_voltage` | 3.154 V | fast (1) |
+| `sensor.<device>_cell_13_voltage` | 3.143 V | fast (1) |
+| `sensor.<device>_cell_14_voltage` | 3.147 V | fast (1) |
+| `sensor.<device>_cell_15_voltage` | 3.151 V | fast (1) |
+| `sensor.<device>_cell_16_voltage` | 3.146 V | fast (1) |
+| `sensor.<device>_battery_state` | discharging | fast (1) |
 | `sensor.<device>_system_status` | 1 | medium (~60) |
 | `sensor.<device>_config_mode` | 100 | medium (~60) |
 | `sensor.<device>_ct_polling_rate` | 119 | medium (~60) |
 | `sensor.<device>_wifi_ssid` | ExampleWiFi | medium (~60) |
-| `sensor.<device>_network_info` | ip:192.168.50.120,gate:192.168.50.1,mask:255.255.255.0,dns:192.168.50.1 | medium (~60) |
-| `sensor.<device>_meter_ip` | (not set) | medium (~60) |
 | `sensor.<device>_device_type` | HMG-50 | medium (~60) |
-| `sensor.<device>_device_id` | ABCD1234567890 | medium (~60) |
-| `sensor.<device>_mac_address` | 00:11:22:33:44:55 | medium (~60) |
 | `sensor.<device>_firmware_version` | 202409090159 | medium (~60) |
+| `sensor.<device>_grid_power` | 0.0 W | medium (~60) |
+| `sensor.<device>_solar_power` | 0.0 W | medium (~60) |
+| `sensor.<device>_daily_energy_charged` | 0.32 kWh | medium (~60) |
+| `sensor.<device>_daily_energy_discharged` | 0.48 kWh | medium (~60) |
+| `sensor.<device>_monthly_energy_charged` | 39.87 kWh | medium (~60) |
+| `sensor.<device>_monthly_energy_discharged` | 31.70 kWh | medium (~60) |
+| `sensor.<device>_total_energy_charged` | 51.51 kWh | medium (~60) |
+| `sensor.<device>_total_energy_discharged` | 41.07 kWh | medium (~60) |
+| `sensor.<device>_mosfet_temperature` | 13.0 °C | medium (~60) |
+| `sensor.<device>_temperature_sensor_1` | 13.0 °C | medium (~60) |
+| `sensor.<device>_temperature_sensor_2` | 13.0 °C | medium (~60) |
+| `sensor.<device>_temperature_sensor_3` | 13.0 °C | medium (~60) |
+| `sensor.<device>_temperature_sensor_4` | 13.0 °C | medium (~60) |
+| `sensor.<device>_work_mode` | 1 | medium (~60) |
+| `sensor.<device>_product_code` | 154 | medium (~60) |
+| `sensor.<device>_power_rating` | 800 W | medium (~60) |
+| `sensor.<device>_bms_version` | 215 | medium (~60) |
+| `sensor.<device>_voltage_limit` | 57.1 V | medium (~60) |
+| `sensor.<device>_charge_current_limit` | 50.0 A | medium (~60) |
+| `sensor.<device>_discharge_current_limit` | 90.0 A | medium (~60) |
+| `sensor.<device>_error_code` | 0 | medium (~60) |
+| `sensor.<device>_warning_code` | 851968 | medium (~60) |
+| `sensor.<device>_runtime` | 33.78 h | medium (~60) |
 
 ### Energy dashboard sensors
 
-The integration also exposes four helper sensors you can add directly to the Home Assistant Energy Dashboard:
+Add the cumulative totals to Home Assistant's Energy Dashboard using your device slug:
+- `sensor.<device>_total_energy_charged` → Battery energy in
+- `sensor.<device>_total_energy_discharged` → Battery energy out
 
-- `Battery Energy In`
-- `Battery Energy Out`
-- `Daily Battery Energy In`
-- `Daily Battery Energy Out`
+These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the recommended sources for long-term battery accounting.
 
 ## Supported Devices
 

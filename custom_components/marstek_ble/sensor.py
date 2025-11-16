@@ -1,25 +1,13 @@
 """Sensor platform for Marstek BLE integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
 
-from datetime import timedelta
-
-from homeassistant.components.integration.const import METHOD_TRAPEZOIDAL
-from homeassistant.components.integration.sensor import IntegrationSensor
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.components.utility_meter.const import (
-    CONF_TARIFF_ENTITY,
-    DAILY,
-    DATA_TARIFF_SENSORS,
-    DATA_UTILITY,
-)
-from homeassistant.components.utility_meter.sensor import UtilityMeterSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
@@ -34,9 +22,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import slugify
 
 from .const import DOMAIN
 from .coordinator import MarstekDataUpdateCoordinator
@@ -126,6 +112,26 @@ async def async_setup_entry(
         MarstekSensor(
             coordinator,
             entry,
+            "grid_power",
+            "Grid Power",
+            lambda data: data.grid_power,
+            UnitOfPower.WATT,
+            SensorDeviceClass.POWER,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "solar_power",
+            "Solar Power",
+            lambda data: data.solar_power,
+            UnitOfPower.WATT,
+            SensorDeviceClass.POWER,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
             "battery_power_in",
             "Battery Power In",
             lambda data: (
@@ -162,6 +168,66 @@ async def async_setup_entry(
             SensorStateClass.MEASUREMENT,
         ),
         # Energy sensors
+        MarstekSensor(
+            coordinator,
+            entry,
+            "daily_energy_charged",
+            "Daily Energy Charged",
+            lambda data: data.daily_energy_charged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "daily_energy_discharged",
+            "Daily Energy Discharged",
+            lambda data: data.daily_energy_discharged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "monthly_energy_charged",
+            "Monthly Energy Charged",
+            lambda data: data.monthly_energy_charged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "monthly_energy_discharged",
+            "Monthly Energy Discharged",
+            lambda data: data.monthly_energy_discharged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "total_energy_charged",
+            "Total Energy Charged",
+            lambda data: data.total_energy_charged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "total_energy_discharged",
+            "Total Energy Discharged",
+            lambda data: data.total_energy_discharged,
+            UnitOfEnergy.KILO_WATT_HOUR,
+            SensorDeviceClass.ENERGY,
+            SensorStateClass.TOTAL_INCREASING,
+        ),
         MarstekSensor(
             coordinator,
             entry,
@@ -221,6 +287,56 @@ async def async_setup_entry(
             SensorDeviceClass.TEMPERATURE,
             SensorStateClass.MEASUREMENT,
         ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "mosfet_temp",
+            "MOSFET Temperature",
+            lambda data: data.mosfet_temp,
+            UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "temp_sensor_1",
+            "Temperature Sensor 1",
+            lambda data: data.temp_sensor_1,
+            UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "temp_sensor_2",
+            "Temperature Sensor 2",
+            lambda data: data.temp_sensor_2,
+            UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "temp_sensor_3",
+            "Temperature Sensor 3",
+            lambda data: data.temp_sensor_3,
+            UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "temp_sensor_4",
+            "Temperature Sensor 4",
+            lambda data: data.temp_sensor_4,
+            UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE,
+            SensorStateClass.MEASUREMENT,
+        ),
         # Diagnostic sensors
         MarstekSensor(
             coordinator,
@@ -253,6 +369,116 @@ async def async_setup_entry(
             None,
             None,
             SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "work_mode",
+            "Work Mode",
+            lambda data: data.work_mode,
+            None,
+            None,
+            SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "product_code",
+            "Product Code",
+            lambda data: data.product_code,
+            None,
+            None,
+            SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "power_rating",
+            "Power Rating",
+            lambda data: data.power_rating,
+            UnitOfPower.WATT,
+            SensorDeviceClass.POWER,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "bms_version",
+            "BMS Version",
+            lambda data: data.bms_version,
+            None,
+            None,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "voltage_limit",
+            "Voltage Limit",
+            lambda data: data.voltage_limit,
+            UnitOfElectricPotential.VOLT,
+            SensorDeviceClass.VOLTAGE,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "charge_current_limit",
+            "Charge Current Limit",
+            lambda data: data.charge_current_limit,
+            UnitOfElectricCurrent.AMPERE,
+            SensorDeviceClass.CURRENT,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "discharge_current_limit",
+            "Discharge Current Limit",
+            lambda data: data.discharge_current_limit,
+            UnitOfElectricCurrent.AMPERE,
+            SensorDeviceClass.CURRENT,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "error_code",
+            "Error Code",
+            lambda data: data.error_code,
+            None,
+            None,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "warning_code",
+            "Warning Code",
+            lambda data: data.warning_code,
+            None,
+            None,
+            None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "runtime_hours",
+            "Runtime",
+            lambda data: data.runtime_hours,
+            UnitOfTime.HOURS,
+            SensorDeviceClass.DURATION,
+            SensorStateClass.TOTAL_INCREASING,
             entity_category=EntityCategory.DIAGNOSTIC,
         ),
     ]
@@ -315,6 +541,14 @@ async def async_setup_entry(
             MarstekTextSensor(
                 coordinator,
                 entry,
+                "serial_number",
+                "Serial Number",
+                lambda data: data.serial_number,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
                 "mac_address",
                 "MAC Address",
                 lambda data: data.mac_address,
@@ -326,6 +560,14 @@ async def async_setup_entry(
                 "firmware_version",
                 "Firmware Version",
                 lambda data: data.firmware_version,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
+                "hardware_version",
+                "Hardware Version",
+                lambda data: data.hardware_version,
                 entity_category=EntityCategory.DIAGNOSTIC,
             ),
             MarstekTextSensor(
@@ -347,6 +589,38 @@ async def async_setup_entry(
             MarstekTextSensor(
                 coordinator,
                 entry,
+                "ip_address",
+                "IP Address",
+                lambda data: data.ip_address,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
+                "gateway",
+                "Gateway",
+                lambda data: data.gateway,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
+                "subnet_mask",
+                "Subnet Mask",
+                lambda data: data.subnet_mask,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
+                "dns_server",
+                "DNS Server",
+                lambda data: data.dns_server,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            MarstekTextSensor(
+                coordinator,
+                entry,
                 "meter_ip",
                 "Meter IP",
                 lambda data: data.meter_ip,
@@ -356,156 +630,6 @@ async def async_setup_entry(
     )
 
     async_add_entities(entities)
-
-    async def _async_setup_energy_helpers() -> None:
-        """Create integration and daily utility meter sensors once base sensors are registered."""
-        try:
-            entity_registry = er.async_get(hass)
-
-            def _resolve_entity_id(key: str) -> str | None:
-                return entity_registry.async_get_entity_id(
-                    "sensor", DOMAIN, f"{entry.entry_id}_{key}"
-                )
-
-            _LOGGER.debug(
-                "Energy helper starting for %s (entry_id=%s)",
-                coordinator.device_name,
-                entry.entry_id,
-            )
-
-            max_attempts = 6
-            delay = 5
-
-            power_in_entity_id: str | None = None
-            power_out_entity_id: str | None = None
-
-            for attempt in range(1, max_attempts + 1):
-                await hass.async_block_till_done()
-                power_in_entity_id = _resolve_entity_id("battery_power_in")
-                power_out_entity_id = _resolve_entity_id("battery_power_out")
-
-                _LOGGER.debug(
-                    "Energy helper attempt %s/%s for %s: in=%s out=%s",
-                    attempt,
-                    max_attempts,
-                    coordinator.device_name,
-                    power_in_entity_id,
-                    power_out_entity_id,
-                )
-
-                if power_in_entity_id and power_out_entity_id:
-                    break
-
-                if attempt < max_attempts:
-                    await asyncio.sleep(delay)
-                else:
-                    _LOGGER.warning(
-                        "Energy helper setup failed to resolve power entities for %s; giving up",
-                        coordinator.device_name,
-                    )
-                    return
-
-            # Fallback: if still missing (edge case), construct expected entity_ids from slugified device name
-            if not power_in_entity_id:
-                power_in_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_in"
-            if not power_out_entity_id:
-                power_out_entity_id = f"sensor.{slugify(coordinator.device_name)}_battery_power_out"
-
-            _LOGGER.debug(
-                "Energy helper resolved power entities for %s: in=%s out=%s",
-                coordinator.device_name,
-                power_in_entity_id,
-                power_out_entity_id,
-            )
-
-            energy_entities: list[IntegrationSensor] = [
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy In",
-                    round_digits=3,
-                    source_entity=power_in_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_in",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                ),
-                IntegrationSensor(
-                    hass,
-                    integration_method=METHOD_TRAPEZOIDAL,
-                    name=f"{coordinator.device_name} Battery Energy Out",
-                    round_digits=3,
-                    source_entity=power_out_entity_id,
-                    unique_id=f"{entry.entry_id}_battery_energy_out",
-                    unit_prefix=None,
-                    unit_time=UnitOfTime.HOURS,
-                    max_sub_interval=None,
-                ),
-            ]
-
-            async_add_entities(energy_entities)
-            await hass.async_block_till_done()
-
-            energy_in_entity_id = _resolve_entity_id("battery_energy_in")
-            energy_out_entity_id = _resolve_entity_id("battery_energy_out")
-
-            utility_entities: list[UtilityMeterSensor] = []
-            utility_data = hass.data.setdefault(DATA_UTILITY, {})
-
-            for slug, source_entity_id, name in [
-                ("daily_battery_energy_in", energy_in_entity_id, f"{coordinator.device_name} Daily Battery Energy In"),
-                ("daily_battery_energy_out", energy_out_entity_id, f"{coordinator.device_name} Daily Battery Energy Out"),
-            ]:
-                if not source_entity_id:
-                    _LOGGER.warning(
-                        "Unable to resolve integration sensor entity for %s; skipping %s",
-                        slug,
-                        name,
-                    )
-                    continue
-
-                parent_meter = f"{entry.entry_id}_{slug}_utility"
-                utility_data[parent_meter] = {
-                    DATA_TARIFF_SENSORS: [],
-                    CONF_TARIFF_ENTITY: None,
-                }
-
-                meter = UtilityMeterSensor(
-                    hass,
-                    cron_pattern=None,
-                    delta_values=False,
-                    meter_offset=timedelta(0),
-                    meter_type=DAILY,
-                    name=name,
-                    net_consumption=False,
-                    parent_meter=parent_meter,
-                    periodically_resetting=False,
-                    source_entity=source_entity_id,
-                    tariff_entity=None,
-                    tariff=None,
-                    unique_id=f"{entry.entry_id}_{slug}",
-                    sensor_always_available=False,
-                )
-
-                utility_data[parent_meter][DATA_TARIFF_SENSORS].append(meter)
-                utility_entities.append(meter)
-
-            if utility_entities:
-                async_add_entities(utility_entities)
-                _LOGGER.debug(
-                    "Energy helper created %d utility meter entities for %s",
-                    len(utility_entities),
-                    coordinator.device_name,
-                )
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.exception(
-                "Energy helper failed for %s (entry_id=%s): %s",
-                coordinator.device_name,
-                entry.entry_id,
-                exc,
-            )
-
-    await _async_setup_energy_helpers()
 
 
 class MarstekSensor(CoordinatorEntity, SensorEntity):
