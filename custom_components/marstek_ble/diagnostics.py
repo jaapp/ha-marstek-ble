@@ -67,7 +67,8 @@ def _coordinator_diagnostics(coordinator: MarstekDataUpdateCoordinator) -> dict[
         "was_unavailable": coordinator._was_unavailable,  # pylint: disable=protected-access
         "last_poll_successful": coordinator.last_poll_successful,
         "polling": {
-            "configured_interval_seconds": coordinator._poll_interval,  # pylint: disable=protected-access
+            "configured_fast_interval_seconds": coordinator._poll_interval,  # pylint: disable=protected-access
+            "configured_medium_interval_seconds": coordinator._medium_poll_interval,  # pylint: disable=protected-access
             "active_update_interval_seconds": update_interval,
             "fast_poll_count": coordinator._fast_poll_count,  # pylint: disable=protected-access
             "medium_poll_count": coordinator._medium_poll_count,  # pylint: disable=protected-access

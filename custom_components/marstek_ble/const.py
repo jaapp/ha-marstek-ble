@@ -3,6 +3,7 @@
 DOMAIN = "marstek_ble"
 
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_MEDIUM_POLL_INTERVAL = "medium_poll_interval"
 
 # BLE Service and Characteristic UUIDs
 SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -20,8 +21,11 @@ UPDATE_INTERVAL_MEDIUM = 60  # System data, WiFi, config
 UPDATE_INTERVAL_SLOW = 300  # Timer info, logs
 
 DEFAULT_POLL_INTERVAL = UPDATE_INTERVAL_FAST
+DEFAULT_MEDIUM_POLL_INTERVAL = UPDATE_INTERVAL_MEDIUM
 MIN_POLL_INTERVAL = 1
 MAX_POLL_INTERVAL = 60
+MIN_MEDIUM_POLL_INTERVAL = 5
+MAX_MEDIUM_POLL_INTERVAL = 300
 
 # Backoff intervals (seconds) applied after successive failures.
 BACKOFF_INTERVALS = (

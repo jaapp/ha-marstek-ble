@@ -10,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
+from .const import (
+    CONF_MEDIUM_POLL_INTERVAL,
+    CONF_POLL_INTERVAL,
+    DEFAULT_MEDIUM_POLL_INTERVAL,
+    DEFAULT_POLL_INTERVAL,
+    DOMAIN,
+)
 from .coordinator import MarstekDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +36,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     address: str = entry.data[CONF_ADDRESS]
     device_name: str = entry.data.get(CONF_NAME, entry.title)
-    poll_interval: int = entry.options.get(
-        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+    poll_interval: int = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    medium_poll_interval: int = entry.options.get(
+        CONF_MEDIUM_POLL_INTERVAL, DEFAULT_MEDIUM_POLL_INTERVAL
     )
 
     # Check for duplicate device names in other entries
@@ -66,6 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device=ble_device,
         device_name=device_name,
         poll_interval=poll_interval,
+        medium_poll_interval=medium_poll_interval,
     )
 
     # Start coordinator and wait for it to be ready
@@ -128,4 +136,7 @@ async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) ->
         return
 
     poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
-    coordinator.set_poll_interval(poll_interval)
+    medium_poll_interval = entry.options.get(
+        CONF_MEDIUM_POLL_INTERVAL, DEFAULT_MEDIUM_POLL_INTERVAL
+    )
+    coordinator.set_poll_intervals(poll_interval, medium_poll_interval)

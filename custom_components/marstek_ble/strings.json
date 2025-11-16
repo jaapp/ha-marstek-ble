@@ -24,7 +24,8 @@
       "init": {
         "title": "Marstek BLE Options",
         "data": {
-          "poll_interval": "Polling interval (seconds)"
+          "poll_interval": "Fast polling interval (seconds)",
+          "medium_poll_interval": "Medium polling interval (seconds)"
         }
       }
     }

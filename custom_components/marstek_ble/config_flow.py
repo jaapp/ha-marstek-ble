@@ -15,11 +15,15 @@ from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_MEDIUM_POLL_INTERVAL,
     CONF_POLL_INTERVAL,
+    DEFAULT_MEDIUM_POLL_INTERVAL,
     DEFAULT_POLL_INTERVAL,
     DEVICE_PREFIXES,
     DOMAIN,
+    MAX_MEDIUM_POLL_INTERVAL,
     MAX_POLL_INTERVAL,
+    MIN_MEDIUM_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
 )
 
@@ -207,8 +211,11 @@ class MarstekBLEOptionsFlow(OptionsFlow):
             _LOGGER.debug("Options updated: %s", user_input)
             return self.async_create_entry(title="", data=user_input)
 
-        current_interval = self._config_entry.options.get(
+        current_fast_interval = self._config_entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+        )
+        current_medium_interval = self._config_entry.options.get(
+            CONF_MEDIUM_POLL_INTERVAL, DEFAULT_MEDIUM_POLL_INTERVAL
         )
 
         return self.async_show_form(
@@ -216,7 +223,7 @@ class MarstekBLEOptionsFlow(OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        CONF_POLL_INTERVAL, default=current_interval
+                        CONF_POLL_INTERVAL, default=current_fast_interval
                     ): selector.NumberSelector(
                         selector.NumberSelectorConfig(
                             min=MIN_POLL_INTERVAL,
@@ -224,7 +231,17 @@ class MarstekBLEOptionsFlow(OptionsFlow):
                             mode=selector.NumberSelectorMode.BOX,
                             unit_of_measurement="s",
                         ),
-                    )
+                    ),
+                    vol.Required(
+                        CONF_MEDIUM_POLL_INTERVAL, default=current_medium_interval
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_MEDIUM_POLL_INTERVAL,
+                            max=MAX_MEDIUM_POLL_INTERVAL,
+                            mode=selector.NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        ),
+                    ),
                 }
             ),
         )

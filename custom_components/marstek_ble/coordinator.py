@@ -34,12 +34,14 @@ from .const import (
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
     CMD_WIFI_SSID,
+    DEFAULT_MEDIUM_POLL_INTERVAL,
     BACKOFF_INTERVALS,
     DEFAULT_POLL_INTERVAL,
+    MAX_MEDIUM_POLL_INTERVAL,
     MAX_POLL_INTERVAL,
+    MIN_MEDIUM_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
     SERVICE_UUID,
-    UPDATE_INTERVAL_MEDIUM,
 )
 from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
@@ -64,6 +66,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         device: BLEDevice,
         device_name: str,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
+        medium_poll_interval: int = DEFAULT_MEDIUM_POLL_INTERVAL,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -84,7 +87,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._medium_poll_count = 0
         self._ready_event = asyncio.Event()
         self._was_unavailable = True
-        self._poll_interval = self._sanitize_poll_interval(poll_interval)
+        self._poll_interval = self._sanitize_fast_poll_interval(poll_interval)
+        self._medium_poll_interval = self._sanitize_medium_poll_interval(
+            medium_poll_interval
+        )
         self._medium_poll_cycle = 1
         self._last_poll_started_at: float | None = None
         self._last_poll_completed_at: float | None = None
@@ -160,8 +166,8 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             )
             return False
 
-    def _sanitize_poll_interval(self, poll_interval: int) -> int:
-        """Clamp the polling interval to supported bounds."""
+    def _sanitize_fast_poll_interval(self, poll_interval: int) -> int:
+        """Clamp the fast polling interval to supported bounds."""
         if poll_interval < MIN_POLL_INTERVAL:
             _LOGGER.debug(
                 "Requested poll interval %s below minimum; clamping to %s",
@@ -178,11 +184,39 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             return MAX_POLL_INTERVAL
         return poll_interval
 
+    def _sanitize_medium_poll_interval(
+        self, medium_poll_interval: int, fast_poll_interval: int | None = None
+    ) -> int:
+        """Clamp the medium polling interval to supported bounds."""
+        fast_interval = fast_poll_interval or self._poll_interval
+        if medium_poll_interval < MIN_MEDIUM_POLL_INTERVAL:
+            _LOGGER.debug(
+                "Requested medium poll interval %s below minimum; clamping to %s",
+                medium_poll_interval,
+                MIN_MEDIUM_POLL_INTERVAL,
+            )
+            medium_poll_interval = MIN_MEDIUM_POLL_INTERVAL
+        if medium_poll_interval > MAX_MEDIUM_POLL_INTERVAL:
+            _LOGGER.debug(
+                "Requested medium poll interval %s above maximum; clamping to %s",
+                medium_poll_interval,
+                MAX_MEDIUM_POLL_INTERVAL,
+            )
+            medium_poll_interval = MAX_MEDIUM_POLL_INTERVAL
+        if medium_poll_interval < fast_interval:
+            _LOGGER.debug(
+                "Medium poll interval %s below fast interval %s; clamping to fast interval",
+                medium_poll_interval,
+                fast_interval,
+            )
+            medium_poll_interval = fast_interval
+        return medium_poll_interval
+
     def _update_poll_schedule(self) -> None:
         """Recalculate polling schedule derived from the fast interval."""
         self.update_interval = timedelta(seconds=self._poll_interval)
         self._medium_poll_cycle = max(
-            1, math.ceil(UPDATE_INTERVAL_MEDIUM / self._poll_interval)
+            1, math.ceil(self._medium_poll_interval / self._poll_interval)
         )
         if self._time_poll_unsub:
             self._time_poll_unsub()
@@ -192,27 +226,46 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             self.hass, self._async_time_poll, timedelta(seconds=self._poll_interval)
         )
         _LOGGER.debug(
-            "Polling schedule updated: fast=%ss, medium every %s updates",
+            "Polling schedule updated: fast=%ss, medium=%ss (every %s updates)",
             self._poll_interval,
+            self._medium_poll_interval,
             self._medium_poll_cycle,
         )
 
-    def set_poll_interval(self, poll_interval: int) -> None:
-        """Update the polling interval."""
-        sanitized = self._sanitize_poll_interval(poll_interval)
-        if sanitized == self._poll_interval:
+    def set_poll_intervals(
+        self, poll_interval: int, medium_poll_interval: int | None = None
+    ) -> None:
+        """Update the polling intervals."""
+        sanitized_fast = self._sanitize_fast_poll_interval(poll_interval)
+        sanitized_medium = self._sanitize_medium_poll_interval(
+            medium_poll_interval
+            if medium_poll_interval is not None
+            else self._medium_poll_interval,
+            sanitized_fast,
+        )
+        if (
+            sanitized_fast == self._poll_interval
+            and sanitized_medium == self._medium_poll_interval
+        ):
             return
 
         _LOGGER.info(
-            "Updating polling interval for %s from %ss to %ss",
+            "Updating polling intervals for %s: fast %ss -> %ss, medium %ss -> %ss",
             self.device_name,
             self._poll_interval,
-            sanitized,
+            sanitized_fast,
+            self._medium_poll_interval,
+            sanitized_medium,
         )
-        self._poll_interval = sanitized
+        self._poll_interval = sanitized_fast
+        self._medium_poll_interval = sanitized_medium
         self._fast_poll_count = 0
         self._medium_poll_count = 0
         self._update_poll_schedule()
+
+    def set_poll_interval(self, poll_interval: int) -> None:
+        """Update the fast polling interval (legacy helper)."""
+        self.set_poll_intervals(poll_interval, self._medium_poll_interval)
 
     @callback
     def _needs_poll(
@@ -311,7 +364,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         await self._poll_fast()
         self._fast_poll_count += 1
 
-        # Medium poll (~every UPDATE_INTERVAL_MEDIUM seconds)
+        # Medium poll (~every configured medium interval)
         if not self._initial_poll_done or self._fast_poll_count % self._medium_poll_cycle == 0:
             await self._poll_medium()
             self._medium_poll_count += 1

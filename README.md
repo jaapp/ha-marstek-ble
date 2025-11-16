@@ -12,7 +12,7 @@ Home Assistant integration for Marstek Venus E energy storage systems via Blueto
 - **Power control**: Output control, EPS mode, power limits, adaptive mode
 - **Energy tracking**: Integration with Home Assistant Energy Dashboard
 - **BLE Proxy support**: Extend range using ESPHome BLE proxies
-- **Configurable polling**: Adjust update interval to balance responsiveness and BLE traffic
+- **Configurable polling**: Adjust fast and medium intervals to balance responsiveness and BLE traffic
 - **Local operation**: No cloud connectivity required
 
 ## Installation
@@ -41,16 +41,18 @@ Or:
 3. Search for "Marstek BLE"
 4. Select your battery from the discovered devices
 5. Click **Submit**
-6. (Optional) Open the integration options to tune the polling interval
+6. (Optional) Open the integration options to tune the fast/medium polling intervals
 
 Repeat for each battery you want to add.
 
 ## Polling
 
-- **Fast (default 1s)**: Runtime info and BMS data; configurable in Options → Polling interval (clamped to 1–60s)
-- **Medium (~60s by default)**: System data, WiFi SSID, config, CT polling rate, meter IP, network info, device identity, timer info, logs; runs as a multiple of the fast interval
+- **Fast (default 1s)**: Runtime info and BMS data; configurable in Options → Fast polling interval (clamped to 1–60s)
+- **Medium (default 60s)**: System data, WiFi SSID, config, CT polling rate, meter IP, network info, device identity, timer info, logs; configurable in Options → Medium polling interval (clamped to 5–300s and not faster than the fast interval)
 
-Entity IDs use your device slug—replace `<device>` with your device name (e.g., `sensor.backup_battery_battery_voltage`). Values below are sample values only—private identifiers (IP, MAC, serials) are intentionally omitted.
+Medium polling is scheduled on multiples of the fast interval, so the cadence is rounded to the nearest fast tick.
+
+Entity IDs use your device slug—replace `<device>` with your device name (e.g., `sensor.backup_battery_battery_voltage`). Values below are sample values only—private identifiers (IP, MAC, serials) are intentionally omitted. Defaults in parentheses reflect the initial configuration; both tiers can be customized in the integration options.
 
 | Entity ID (example) | Example value | Polling tier (s) |
 | --- | --- | --- |
