@@ -48,8 +48,7 @@ Repeat for each battery you want to add.
 ## Polling
 
 - **Fast (default 1s)**: Runtime info and BMS data; configurable in Options → Polling interval (clamped to 1–60s)
-- **Medium (~60s by default)**: System data, WiFi SSID, config, CT polling rate, meter IP, network info; runs as a multiple of the fast interval
-- **Slow (~5m by default)**: Device info, timer info, logs; runs as a multiple of the fast interval
+- **Medium (~60s by default)**: System data, WiFi SSID, config, CT polling rate, meter IP, network info, device identity, timer info, logs; runs as a multiple of the fast interval
 
 Entity IDs use your device slug—replace `<device>` with your device name (e.g., `sensor.backup_battery_battery_voltage`):
 
@@ -92,10 +91,10 @@ Entity IDs use your device slug—replace `<device>` with your device name (e.g.
 | `sensor.<device>_wifi_ssid` | (unknown) | medium (~60) |
 | `sensor.<device>_network_info` | ip:192.168.7.183,gate:192.168.7.1,mask:255.255.255.0,dns:192.168.7.1 | medium (~60) |
 | `sensor.<device>_meter_ip` | (not set) | medium (~60) |
-| `sensor.<device>_device_type` | (unknown) | slow (~300) |
-| `sensor.<device>_device_id` | (unknown) | slow (~300) |
-| `sensor.<device>_mac_address` | (unknown) | slow (~300) |
-| `sensor.<device>_firmware_version` | (unknown) | slow (~300) |
+| `sensor.<device>_device_type` | (unknown) | medium (~60) |
+| `sensor.<device>_device_id` | (unknown) | medium (~60) |
+| `sensor.<device>_mac_address` | (unknown) | medium (~60) |
+| `sensor.<device>_firmware_version` | (unknown) | medium (~60) |
 
 ### Energy dashboard sensors
 

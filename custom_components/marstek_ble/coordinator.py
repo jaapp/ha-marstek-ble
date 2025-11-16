@@ -40,7 +40,6 @@ from .const import (
     MIN_POLL_INTERVAL,
     SERVICE_UUID,
     UPDATE_INTERVAL_MEDIUM,
-    UPDATE_INTERVAL_SLOW,
 )
 from .marstek_device import MarstekBLEDevice, MarstekData, MarstekProtocol
 
@@ -79,12 +78,10 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._connected = False
         self._fast_poll_count = 0
         self._medium_poll_count = 0
-        self._slow_poll_count = 0
         self._ready_event = asyncio.Event()
         self._was_unavailable = True
         self._poll_interval = self._sanitize_poll_interval(poll_interval)
         self._medium_poll_cycle = 1
-        self._slow_poll_cycle = 1
         self._last_poll_started_at: float | None = None
         self._last_poll_completed_at: float | None = None
         self._current_poll_commands: list[dict[str, object]] = []
@@ -185,9 +182,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._medium_poll_cycle = max(
             1, math.ceil(UPDATE_INTERVAL_MEDIUM / self._poll_interval)
         )
-        self._slow_poll_cycle = max(
-            1, math.ceil(UPDATE_INTERVAL_SLOW / self._poll_interval)
-        )
         if self._time_poll_unsub:
             self._time_poll_unsub()
             self._time_poll_unsub = None
@@ -196,10 +190,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             self.hass, self._async_time_poll, timedelta(seconds=self._poll_interval)
         )
         _LOGGER.debug(
-            "Polling schedule updated: fast=%ss, medium every %s updates, slow every %s updates",
+            "Polling schedule updated: fast=%ss, medium every %s updates",
             self._poll_interval,
             self._medium_poll_cycle,
-            self._slow_poll_cycle,
         )
 
     def set_poll_interval(self, poll_interval: int) -> None:
@@ -217,7 +210,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         self._poll_interval = sanitized
         self._fast_poll_count = 0
         self._medium_poll_count = 0
-        self._slow_poll_count = 0
         self._update_poll_schedule()
 
     @callback
@@ -311,11 +303,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
             await self._poll_medium()
             self._medium_poll_count += 1
 
-        # Slow poll (~every UPDATE_INTERVAL_SLOW seconds)
-        if not self._initial_poll_done or self._fast_poll_count % self._slow_poll_cycle == 0:
-            await self._poll_slow()
-            self._slow_poll_count += 1
-
         # Return the current data snapshot so ActiveBluetoothDataUpdateCoordinator
         # retains the populated MarstekData instance.
         duration = time.monotonic() - start_monotonic
@@ -386,7 +373,7 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
 
     async def _poll_medium(self) -> None:
-        """Poll medium-update data (system, WiFi, config, etc)."""
+        """Poll medium-update data (system, WiFi, config, identity, logs)."""
         # System data
         await self._safe_send_and_sleep(CMD_SYSTEM_DATA)
 
@@ -405,8 +392,6 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         # Network info
         await self._safe_send_and_sleep(CMD_NETWORK_INFO)
 
-    async def _poll_slow(self) -> None:
-        """Poll slow-update data (timer info, logs)."""
         # Device info (identity/firmware)
         await self._safe_send_and_sleep(CMD_DEVICE_INFO)
 
