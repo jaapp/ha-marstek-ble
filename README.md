@@ -11,7 +11,7 @@ Home Assistant integration for Marstek Venus E energy storage systems via Blueto
 - **Real-time monitoring**: Battery voltage, current, SOC, SOH, temperature, cell voltages
 - **Power control**: Output control, EPS mode, power limits, adaptive mode
 - **Energy tracking**: Integration with Home Assistant Energy Dashboard
-- **BLE Proxy support**: Extend range using ESPHome BLE proxies
+- **BLE Proxy support**: Extend range using ESPHome BLE proxies. One proxy can connect multiple batteries.
 - **Configurable polling**: Adjust fast and medium intervals to balance responsiveness and BLE traffic
 - **Local operation**: No cloud connectivity required
 
@@ -138,7 +138,7 @@ These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the rec
 
 ## BLE Proxy Setup
 
-To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/components/bluetooth_proxy/):
+To extend Bluetooth range, set up an [ESPHome BLE Proxy](https://esphome.io/components/bluetooth_proxy/). One proxy can connect to multiple batteries.
 
 ### Recommended Hardware
 
