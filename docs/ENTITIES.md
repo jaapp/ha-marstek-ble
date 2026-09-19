@@ -71,6 +71,10 @@ Selections are written immediately and reflected back on the next medium-poll re
 | `Grid Power` (`sensor.<device>_grid_power`) | W / `power` | 0x03 | Backup/grid power (signed). |
 | `Solar Power` (`sensor.<device>_solar_power`) | W / `power` | 0x03 | Solar/battery channel power (signed). |
 | `Output 1 Power` (`sensor.<device>_out1_power`) | W / `power` | 0x03 | Instantaneous output power. |
+| `CT Total Power` (`sensor.<device>_ct_total_power`) | W / `power` | 0x03 | Venus E mini. Reading from the external CT/meter the device is following (signed). |
+| `Inverter Power` (`sensor.<device>_inverter_power`) | W / `power` | 0x03 | Venus E mini. Inverter/battery-side power; positive = charging. |
+| `Grid Frequency` (`sensor.<device>_grid_frequency`) | Hz / `frequency` | 0x03 | Venus E mini. |
+| `AC Voltage` (`sensor.<device>_ac_voltage`) | V / `voltage` | 0x03 | Venus E mini. Mains voltage at the inverter. |
 
 ### Energy counters & capacity
 
@@ -118,7 +122,7 @@ Selections are written immediately and reflected back on the next medium-poll re
 
 | Friendly name (suffix) | Type | Source | Notes |
 | --- | --- | --- | --- |
-| `Battery State` (`sensor.<device>_battery_state`) | text | Calculated | `charging` / `discharging` / `inactive` based on power flow. |
+| `Battery State` (`sensor.<device>_battery_state`) | text | 0x03 / Calculated | `charging` / `discharging` / `inactive`. Uses the device's own state byte on the Venus E mini, otherwise the sign of battery power. |
 | `Device Type` (`sensor.<device>_device_type`) | text | 0x04 | e.g., `HMG-50`. |
 | `Device ID` (`sensor.<device>_device_id`) | text | 0x04 | Device identifier string. |
 | `Serial Number` (`sensor.<device>_serial_number`) | text | 0x04 | Hardware serial. |
@@ -138,5 +142,29 @@ Selections are written immediately and reflected back on the next medium-poll re
 | Friendly name (suffix) | Unit/class | Source | Notes |
 | --- | --- | --- | --- |
 | `Cell 1 Voltage` … `Cell 16 Voltage` (`sensor.<device>_cell_<n>_voltage`) | V / `voltage` | 0x14 | Per-cell voltages; diagnostic category. |
+| `Cell Voltage Max` (`sensor.<device>_cell_voltage_max`) | V / `voltage` | 0x14 | Venus E mini, which reports only the extremes. |
+| `Cell Voltage Min` (`sensor.<device>_cell_voltage_min`) | V / `voltage` | 0x14 | Venus E mini, which reports only the extremes. |
 
 These sensors are marked as diagnostic entities where appropriate so they can be hidden from the dashboard if desired.
+
+## Venus E mini differences
+
+The Venus E mini (`MARS_VNSEM_*`, model `VNSEMINI-0`) answers `0x03` with a
+120-byte payload and `0x14` with 44 bytes, neither of which shares offsets with
+the layouts above. It is parsed separately, selected on payload length, and
+differs in what it can report:
+
+- **Per-cell voltages are not available.** The pack is 20S and `0x14` carries
+  only the extremes, exposed as `Cell Voltage Max` / `Cell Voltage Min`. Pack
+  voltage divided by max cell voltage is 20.0 in every observed frame, and 44
+  bytes cannot hold 16 cell voltages.
+- **No energy counters.** Daily, monthly and total charged/discharged appear in
+  neither payload — offsets 55-90 of `0x03` are zero throughout — so those
+  sensors stay unavailable rather than reporting values read out of padding.
+  They presumably live in one of the commands this model never answers
+  (`0x0D`, `0x13`, `0x1C`, `0x21`, `0x22` all time out).
+- **No solar or Output 1 channel**, and the Wi-Fi/MQTT/Out1/External binary
+  sensors are unavailable: the bytes the other layouts use for those status
+  flags belong to the remaining-capacity field here.
+- **Extra sensors**: `CT Total Power`, `Inverter Power`, `Grid Frequency`,
+  `AC Voltage`, `Cell Voltage Max`, `Cell Voltage Min`.

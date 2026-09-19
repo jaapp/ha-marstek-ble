@@ -52,6 +52,12 @@ class MarstekData:
     monthly_energy_discharged: float | None = None  # kWh
     total_energy_charged: float | None = None  # kWh
     total_energy_discharged: float | None = None  # kWh
+    # Runtime info (0x03) - Venus E mini 120-byte layout
+    grid_frequency: float | None = None  # Hz
+    ac_voltage: float | None = None  # V
+    ct_total_power: float | None = None  # W, signed
+    inverter_power: float | None = None  # W, signed, positive = charging
+    battery_state_code: int | None = None  # 0 idle, 1 discharging, 2 charging
 
     # Device info (0x04)
     device_type: str | None = None
@@ -98,6 +104,9 @@ class MarstekData:
     temp_sensor_2: float | None = None  # °C
     temp_sensor_3: float | None = None  # °C
     temp_sensor_4: float | None = None  # °C
+    # BMS data (0x14) - Venus E mini 44-byte layout
+    cell_voltage_max: float | None = None  # V
+    cell_voltage_min: float | None = None  # V
 
     # Config data (0x1A)
     config_mode: int | None = None
@@ -260,6 +269,13 @@ class MarstekProtocol:
             _LOGGER.warning("Runtime info payload too short: %d bytes", len(payload))
             return False
 
+        # Venus E mini (VNSEMINI-0) answers 0x03 with 120 bytes and a layout
+        # that shares no offsets with the formats below.
+        if len(payload) >= 120:
+            return MarstekProtocol._parse_runtime_info_mini(
+                payload, device_data, timestamp
+            )
+
         # Short format (37 bytes) - older firmware or different model
         if len(payload) < 60:
             VERBOSE_LOGGER.debug("Parsing short runtime info format (%d bytes)", len(payload))
@@ -375,6 +391,85 @@ class MarstekProtocol:
         return True
 
     @staticmethod
+    def _parse_runtime_info_mini(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
+        """Parse runtime info (0x03), Venus E mini 120-byte payload.
+
+        Offsets derived by correlating raw frames against the local API across
+        forced charge, forced discharge and idle. Little-endian throughout.
+        """
+        device_data.grid_frequency = struct.unpack("<H", payload[0:2])[0] / 100.0
+        device_data.ac_voltage = struct.unpack("<H", payload[2:4])[0] / 10.0
+        device_data.ct_total_power = float(struct.unpack("<h", payload[4:6])[0])
+        # Offsets 6 and 8 are power-electronics sensors: same scale, but they
+        # run 5-10 K hotter than the cells and follow load rather than SOC.
+        device_data.temp_sensor_3 = struct.unpack("<H", payload[6:8])[0] / 10.0
+        device_data.temp_sensor_4 = struct.unpack("<H", payload[8:10])[0] / 10.0
+        device_data.temp_high = struct.unpack("<H", payload[10:12])[0] / 10.0
+        device_data.temp_low = struct.unpack("<H", payload[12:14])[0] / 10.0
+        device_data.grid_power = float(struct.unpack("<i", payload[34:38])[0])
+        device_data.battery_state_code = int(payload[38])
+        device_data.work_mode = int(payload[38])
+        # Offset 47 is oddly aligned (46 is always zero, 48-49 carry other
+        # data) but its identity is solid: it swings positive while charging
+        # and negative while discharging, tracking grid power minus losses.
+        device_data.inverter_power = float(struct.unpack("<h", payload[47:49])[0])
+        device_data.power_rating = int(struct.unpack("<H", payload[112:114])[0])
+
+        # Deliberately left unset on this model rather than reported wrongly:
+        #   solar_power     - the mini has no PV input
+        #   *_energy_*      - no counters in 0x03; offsets 55-90 are dead
+        #   out1_power      - offsets 20-21 are always zero
+        #   wifi/mqtt/out1/extern flags - payload[15], [16] and [28] belong to
+        #     the remaining-capacity field here, not to status bits
+        for unsupported in (
+            "solar_power",
+            "out1_power",
+            "daily_energy_charged",
+            "daily_energy_discharged",
+            "monthly_energy_charged",
+            "monthly_energy_discharged",
+            "total_energy_charged",
+            "total_energy_discharged",
+            "wifi_connected",
+            "mqtt_connected",
+            "out1_active",
+            "extern1_connected",
+        ):
+            setattr(device_data, unsupported, None)
+
+        for field in (
+            "grid_frequency",
+            "ac_voltage",
+            "ct_total_power",
+            "temp_sensor_3",
+            "temp_sensor_4",
+            "temp_high",
+            "temp_low",
+            "grid_power",
+            "battery_state_code",
+            "work_mode",
+            "inverter_power",
+            "power_rating",
+        ):
+            MarstekProtocol._track_field(device_data, field, 0x03, timestamp, payload)
+
+        VERBOSE_LOGGER.debug(
+            "Runtime data parsed (cmd=0x03, mini): %.2fHz %.1fV ct=%sW grid=%sW "
+            "inverter=%sW state=%s temps=%s/%s",
+            device_data.grid_frequency,
+            device_data.ac_voltage,
+            device_data.ct_total_power,
+            device_data.grid_power,
+            device_data.inverter_power,
+            device_data.battery_state_code,
+            device_data.temp_low,
+            device_data.temp_high,
+        )
+        return True
+
+    @staticmethod
     def _parse_device_info(
         payload: bytes, device_data: MarstekData, timestamp: float
     ) -> bool:
@@ -486,6 +581,12 @@ class MarstekProtocol:
         payload: bytes, device_data: MarstekData, timestamp: float
     ) -> bool:
         """Parse BMS data (0x14)."""
+        # Venus E mini (VNSEMINI-0) answers 0x14 with 44 bytes. Without this
+        # the response is discarded and every BMS entity stays unknown.
+        if 44 <= len(payload) < 80:
+            return MarstekProtocol._parse_bms_data_mini(
+                payload, device_data, timestamp
+            )
         if len(payload) < 80:
             return False
 
@@ -567,6 +668,59 @@ class MarstekProtocol:
             device_data.runtime_hours,
         )
 
+        return True
+
+    @staticmethod
+    def _parse_bms_data_mini(
+        payload: bytes, device_data: MarstekData, timestamp: float
+    ) -> bool:
+        """Parse BMS data (0x14), Venus E mini 44-byte payload.
+
+        Offsets derived alongside the 0x03 mini layout. Bytes 0-11 are always
+        zero on this model, so the BMS version and the voltage/current limits
+        the 80-byte format carries have no equivalent here.
+        """
+        device_data.battery_soc = struct.unpack("<H", payload[12:14])[0] / 10.0
+        device_data.battery_soh = struct.unpack("<H", payload[14:16])[0] / 10.0
+        device_data.design_capacity = float(struct.unpack("<H", payload[16:18])[0])
+        device_data.battery_voltage = struct.unpack("<H", payload[18:20])[0] / 100.0
+        device_data.battery_current = struct.unpack("<i", payload[22:26])[0] / 10000.0
+        device_data.battery_temp = struct.unpack("<H", payload[26:28])[0] / 10.0
+        device_data.temp_sensor_1 = struct.unpack("<H", payload[36:38])[0] / 10.0
+        device_data.temp_sensor_2 = struct.unpack("<H", payload[38:40])[0] / 10.0
+        device_data.cell_voltage_max = struct.unpack("<H", payload[40:42])[0] / 1000.0
+        device_data.cell_voltage_min = struct.unpack("<H", payload[42:44])[0] / 1000.0
+
+        # The pack is 20S and 0x14 reports only the extremes: pack voltage
+        # divided by max cell voltage is 20.0 in every observed frame, and
+        # 44 bytes cannot carry 16 cell voltages.
+        device_data.cell_voltages = [None] * 16
+
+        for field in (
+            "battery_soc",
+            "battery_soh",
+            "design_capacity",
+            "battery_voltage",
+            "battery_current",
+            "battery_temp",
+            "temp_sensor_1",
+            "temp_sensor_2",
+            "cell_voltage_max",
+            "cell_voltage_min",
+        ):
+            MarstekProtocol._track_field(device_data, field, 0x14, timestamp, payload)
+
+        VERBOSE_LOGGER.debug(
+            "BMS data parsed (cmd=0x14, mini): soc=%.1f%% %.2fV %.3fA %.1f°C "
+            "cells %.3f/%.3fV rated=%sWh",
+            device_data.battery_soc,
+            device_data.battery_voltage,
+            device_data.battery_current,
+            device_data.battery_temp,
+            device_data.cell_voltage_max,
+            device_data.cell_voltage_min,
+            device_data.design_capacity,
+        )
         return True
 
     @staticmethod

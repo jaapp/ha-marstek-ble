@@ -7,6 +7,9 @@
     },
     {
       "local_name": "MST_VNSE3_*"
+    },
+    {
+      "local_name": "MARS_VNSEM_*"
     }
   ],
   "codeowners": [

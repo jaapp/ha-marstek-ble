@@ -14,6 +14,7 @@ from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
+    UnitOfFrequency,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
@@ -131,6 +132,70 @@ async def async_setup_entry(
             UnitOfPower.WATT,
             SensorDeviceClass.POWER,
             SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "ct_total_power",
+            "CT Total Power",
+            lambda data: data.ct_total_power,
+            UnitOfPower.WATT,
+            SensorDeviceClass.POWER,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "inverter_power",
+            "Inverter Power",
+            lambda data: data.inverter_power,
+            UnitOfPower.WATT,
+            SensorDeviceClass.POWER,
+            SensorStateClass.MEASUREMENT,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "grid_frequency",
+            "Grid Frequency",
+            lambda data: data.grid_frequency,
+            UnitOfFrequency.HERTZ,
+            SensorDeviceClass.FREQUENCY,
+            SensorStateClass.MEASUREMENT,
+            suggested_display_precision=2,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "ac_voltage",
+            "AC Voltage",
+            lambda data: data.ac_voltage,
+            UnitOfElectricPotential.VOLT,
+            SensorDeviceClass.VOLTAGE,
+            SensorStateClass.MEASUREMENT,
+            suggested_display_precision=1,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "cell_voltage_max",
+            "Cell Voltage Max",
+            lambda data: data.cell_voltage_max,
+            UnitOfElectricPotential.VOLT,
+            SensorDeviceClass.VOLTAGE,
+            SensorStateClass.MEASUREMENT,
+            suggested_display_precision=3,
+        ),
+        MarstekSensor(
+            coordinator,
+            entry,
+            "cell_voltage_min",
+            "Cell Voltage Min",
+            lambda data: data.cell_voltage_min,
+            UnitOfElectricPotential.VOLT,
+            SensorDeviceClass.VOLTAGE,
+            SensorStateClass.MEASUREMENT,
+            suggested_display_precision=3,
         ),
         MarstekSensor(
             coordinator,
@@ -518,7 +583,13 @@ async def async_setup_entry(
                 "battery_state",
                 "Battery State",
                 lambda data: (
-                    "charging"
+                    # The mini reports its own state byte; fall back to the
+                    # sign of battery power on models that do not.
+                    {0: "inactive", 1: "discharging", 2: "charging"}.get(
+                        data.battery_state_code, "unknown"
+                    )
+                    if data.battery_state_code is not None
+                    else "charging"
                     if data.battery_voltage is not None
                     and data.battery_current is not None
                     and data.battery_voltage * data.battery_current > 5

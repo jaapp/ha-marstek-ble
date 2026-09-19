@@ -13,7 +13,8 @@ CHAR_NOTIFY_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
 # Device name prefixes for discovery
 # MST_ACCP_ = Hardware v2 (Venus E)
 # MST_VNSE3_ = Hardware v3
-DEVICE_PREFIXES = ("MST_ACCP_", "MST_VNSE3_")
+# MARS_VNSEM_ = Venus E mini
+DEVICE_PREFIXES = ("MST_ACCP_", "MST_VNSE3_", "MARS_VNSEM_")
 
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 1  # Runtime info, BMS data
