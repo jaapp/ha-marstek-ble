@@ -135,6 +135,7 @@ These increment-only sensors (e.g., `51.51 kWh` in, `41.07 kWh` out) are the rec
 
 - Marstek Venus E hardware v2 (`MST_ACCP_*` - tested)
 - Marstek Venus E hardware v3 (`MST_VNSE3_*` - untested)
+- Marstek Venus E mini (`MARS_VNSEM_*` - tested, firmware 301)
 
 ## BLE Proxy Setup
 
