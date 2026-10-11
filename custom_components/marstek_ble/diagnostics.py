@@ -95,7 +95,8 @@ async def async_get_config_entry_diagnostics(
     if coordinator is None:
         return {"error": "coordinator_not_available"}
 
-    manifest_version = _load_manifest_version()
+    # Keep resource lookup, file I/O and JSON parsing out of the event loop.
+    manifest_version = await hass.async_add_executor_job(_load_manifest_version)
 
     diagnostics: dict[str, Any] = {
         "environment": {
