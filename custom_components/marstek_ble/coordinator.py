@@ -33,7 +33,6 @@ from .const import (
     CMD_RUNTIME_INFO,
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
-    CMD_WIFI_SSID,
     DEFAULT_MEDIUM_POLL_INTERVAL,
     BACKOFF_INTERVALS,
     DEFAULT_POLL_INTERVAL,
@@ -437,12 +436,9 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
         )
 
     async def _poll_medium(self) -> None:
-        """Poll medium-update data (system, WiFi, config, identity, logs)."""
+        """Poll medium-update data (system, config, identity, network, logs)."""
         # System data
         await self._safe_send_and_sleep(CMD_SYSTEM_DATA)
-
-        # WiFi SSID
-        await self._safe_send_and_sleep(CMD_WIFI_SSID)
 
         # Config data
         await self._safe_send_and_sleep(CMD_CONFIG_DATA)

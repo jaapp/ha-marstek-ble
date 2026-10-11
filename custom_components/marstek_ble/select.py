@@ -7,6 +7,7 @@ from typing import Any, Callable
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,6 +17,7 @@ from .const import (
     CMD_AUTO_MODE,
     CMD_CHARGE_MODE,
     CMD_CT_POLLING_RATE_WRITE,
+    CMD_SYSTEM_DATA,
     CMD_WORK_MODE,
     DOMAIN,
 )
@@ -25,6 +27,37 @@ from .marstek_device import MarstekData
 _LOGGER = logging.getLogger(__name__)
 
 SelectValueFn = Callable[[MarstekData], Any | None]
+MODE_STALE_AFTER_SECONDS = 10 * 60
+OPERATING_MODE_OPTIONS = {0: "Self-Consumption", 1: "Manual", 5: "AI Optimization"}
+
+
+def _reported_operating_mode(data: MarstekData | None) -> str | None:
+    """Decode user mode from the validated 0x0D system-info payload.
+
+    DeveloperModeInfo in rweijnen/marstek-venus-monitor identifies byte 17
+    of the 19-byte payload. Live Venus E v3 tests on 2026-10-11 established
+    0=self-consumption, 1=manual, 5=AI, correcting the reference's enum.
+    The existing parser retains this payload in system_status metadata.
+    Runtime work_mode is a different enum; never infer user mode from it.
+    """
+    if data is None:
+        return None
+    meta = data.get_field_metadata("system_status")
+    if not meta or meta.get("command") != CMD_SYSTEM_DATA:
+        return None
+    age = meta.get("age_seconds")
+    if age is None or age < 0 or age > MODE_STALE_AFTER_SECONDS:
+        return None
+    payload_hex = meta.get("payload_hex")
+    if not isinstance(payload_hex, str):
+        return None
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return None
+    if len(payload) < 19:
+        return None
+    return OPERATING_MODE_OPTIONS.get(payload[17])
 
 
 async def async_setup_entry(
@@ -36,10 +69,7 @@ async def async_setup_entry(
     coordinator: MarstekDataUpdateCoordinator = entry.runtime_data
 
     entities = [
-        MarstekOperatingModeSelect(
-            coordinator,
-            entry,
-        ),
+        MarstekOperatingModeSelect(coordinator, entry),
         MarstekSelect(
             coordinator,
             entry,
@@ -67,7 +97,6 @@ async def async_setup_entry(
             current_value_fn=lambda data: data.ct_polling_rate,
         ),
     ]
-
     async_add_entities(entities)
 
 
@@ -75,13 +104,10 @@ class MarstekOperatingModeSelect(
     CoordinatorEntity[MarstekDataUpdateCoordinator],
     SelectEntity,
 ):
-    """Representation of Marstek operating mode selector.
+    """Operating mode backed by device readback, not the last request.
 
-    This select entity allows switching between the two main operating modes:
-    - Self-Consumption: Optimize for self-consumption of solar power
-    - Manual: User controls power settings manually
-
-    Note: AI Optimization mode is not supported over BLE.
+    AI Optimization is reported when selected externally, but writing it
+    over BLE remains unsupported, matching the upstream main branch.
     """
 
     def __init__(
@@ -95,42 +121,54 @@ class MarstekOperatingModeSelect(
         self._attr_has_entity_name = True
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_operating_mode"
-        self._attr_options = ["Self-Consumption", "Manual"]
-        self._attr_current_option: str | None = None
+        self._attr_options = ["Self-Consumption", "AI Optimization", "Manual"]
 
     @property
     def current_option(self) -> str | None:
-        """Return the selected option."""
-        return self._attr_current_option
+        """Return the latest reported mode, including external changes."""
+        return _reported_operating_mode(self.coordinator.data)
 
     async def async_select_option(self, option: str) -> None:
-        """Change the selected operating mode."""
-        _LOGGER.debug("Selecting operating mode: %s", option)
-
-        # Map option to command and payload
+        """Send a mode request and verify it using fresh system info."""
         mode_commands = {
             "Self-Consumption": (CMD_AUTO_MODE, b"\x01"),
             "Manual": (CMD_WORK_MODE, b"\x01"),
         }
-
         if option not in mode_commands:
-            _LOGGER.error("Invalid operating mode: %s", option)
-            return
+            raise HomeAssistantError(
+                f"Cannot select {option!r} over BLE; only Self-Consumption "
+                "and Manual writes are supported. AI Optimization is readback-only."
+            )
 
         cmd, payload = mode_commands[option]
-        _LOGGER.debug(
-            "Sending command 0x%02X with payload %s for mode %s",
-            cmd,
-            payload.hex(),
-            option,
-        )
+        if not await self.coordinator.device.send_command(cmd, payload):
+            raise HomeAssistantError(f"Failed to send operating-mode request for {option}")
 
-        if await self.coordinator.device.send_command(cmd, payload):
-            self._attr_current_option = option
-            self.async_write_ha_state()
-            _LOGGER.info("Successfully switched to %s mode", option)
-        else:
-            _LOGGER.error("Failed to switch to %s mode", option)
+        # Do not change the state optimistically or reuse a pre-write report.
+        data = self.coordinator.data
+        previous = data.get_field_metadata("system_status") if data is not None else None
+        previous_timestamp = previous.get("timestamp") if previous else None
+        readback_ok = await self.coordinator.device.send_command(CMD_SYSTEM_DATA)
+        data = self.coordinator.data
+        report = data.get_field_metadata("system_status") if data is not None else None
+        self.async_write_ha_state()
+        if (
+            not readback_ok
+            or not report
+            or not report.get("timestamp")
+            or report["timestamp"] == previous_timestamp
+        ):
+            raise HomeAssistantError(
+                f"Mode request for {option} was sent, but fresh readback was not received; "
+                "the battery may have changed mode."
+            )
+        actual = self.current_option
+        if actual != option:
+            raise HomeAssistantError(
+                f"Mode request for {option} was sent, but readback reports {actual!r}; "
+                "the requested mode is not confirmed."
+            )
+        _LOGGER.info("Device readback confirmed operating mode %s", actual)
 
     @property
     def device_info(self):
@@ -177,7 +215,6 @@ class MarstekSelect(
             value: option for option, (_, value) in options_map.items() if value is not None
         }
         self._current_value_fn = current_value_fn
-
         self._sync_from_coordinator()
 
     @property

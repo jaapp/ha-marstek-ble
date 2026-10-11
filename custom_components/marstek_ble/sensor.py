@@ -581,14 +581,6 @@ async def async_setup_entry(
             MarstekTextSensor(
                 coordinator,
                 entry,
-                "wifi_ssid",
-                "WiFi SSID",
-                lambda data: data.wifi_ssid,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
-            MarstekTextSensor(
-                coordinator,
-                entry,
                 "network_info",
                 "Network Info",
                 lambda data: data.network_info,
