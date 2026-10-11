@@ -28,14 +28,15 @@ _LOGGER = logging.getLogger(__name__)
 
 SelectValueFn = Callable[[MarstekData], Any | None]
 MODE_STALE_AFTER_SECONDS = 10 * 60
-OPERATING_MODE_OPTIONS = {0: "Self-Consumption", 1: "AI Optimization", 2: "Manual"}
+OPERATING_MODE_OPTIONS = {0: "Self-Consumption", 1: "Manual", 5: "AI Optimization"}
 
 
 def _reported_operating_mode(data: MarstekData | None) -> str | None:
     """Decode user mode from the validated 0x0D system-info payload.
 
-    DeveloperModeInfo in rweijnen/marstek-venus-monitor decodes byte 17
-    of its 19-byte payload as user mode (0=self-consumption, 1=AI, 2=manual).
+    DeveloperModeInfo in rweijnen/marstek-venus-monitor identifies byte 17
+    of the 19-byte payload. Live Venus E v3 tests on 2026-10-11 established
+    0=self-consumption, 1=manual, 5=AI, correcting the reference's enum.
     The existing parser retains this payload in system_status metadata.
     Runtime work_mode is a different enum; never infer user mode from it.
     """
@@ -120,7 +121,7 @@ class MarstekOperatingModeSelect(
         self._attr_has_entity_name = True
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_unique_id = f"{entry.entry_id}_operating_mode"
-        self._attr_options = list(OPERATING_MODE_OPTIONS.values())
+        self._attr_options = ["Self-Consumption", "AI Optimization", "Manual"]
 
     @property
     def current_option(self) -> str | None:
