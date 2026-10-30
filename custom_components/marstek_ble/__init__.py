@@ -27,6 +27,7 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
     Platform.SWITCH,
     Platform.SELECT,
+    Platform.NUMBER,
 ]
 
 
@@ -75,6 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         poll_interval=poll_interval,
         medium_poll_interval=medium_poll_interval,
     )
+    coordinator.config_entry = entry
 
     # Start coordinator and wait for it to be ready
     entry.async_on_unload(coordinator.async_start())

@@ -14,6 +14,9 @@ Home Assistant integration for Marstek Venus E energy storage systems via Blueto
 - **BLE Proxy support**: Extend range using ESPHome BLE proxies. One proxy can connect multiple batteries.
 - **Configurable polling**: Adjust fast and medium intervals to balance responsiveness and BLE traffic
 - **Local operation**: No cloud connectivity required
+- **Local API controls**: Enable/disable the UDP API and set its port over Bluetooth (1–65535; default 30000).
+  Switch state reflects the last acknowledged command and starts unknown. While unknown, port edits are saved until an explicit on/off command.
+  Update any separate Local API client when changing ports.
 
 ## Installation
 

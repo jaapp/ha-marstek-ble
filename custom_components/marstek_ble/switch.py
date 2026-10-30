@@ -76,7 +76,44 @@ async def async_setup_entry(
         ),
     ]
 
+    entities.append(MarstekLocalApiSwitch(coordinator, entry))
     async_add_entities(entities)
+
+
+
+class MarstekLocalApiSwitch(CoordinatorEntity[MarstekDataUpdateCoordinator], SwitchEntity):
+    """Manage the battery's UDP Local API using Bluetooth."""
+
+    _attr_name = "Local API"
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:api"
+    _attr_assumed_state = True
+
+    def __init__(self, coordinator: MarstekDataUpdateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_local_api"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.ble_device.address)},
+            "connections": {(CONNECTION_BLUETOOTH, coordinator.ble_device.address)},
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        """Unknown until an acknowledged write in this HA session."""
+        settings = self.coordinator.local_api_settings
+        return settings[0] if settings is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Command ACKs are not independent status telemetry."""
+        return {"state_source": self.coordinator.local_api_state_source}
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_set_local_api(enabled=True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_set_local_api(enabled=False)
 
 
 class MarstekSwitch(CoordinatorEntity[MarstekDataUpdateCoordinator], SwitchEntity):

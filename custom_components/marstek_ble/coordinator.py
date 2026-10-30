@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import struct
 from datetime import timedelta
 import time
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from homeassistant.components.bluetooth.active_update_coordinator import (
     ActiveBluetoothDataUpdateCoordinator,
 )
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
@@ -34,6 +36,8 @@ from .const import (
     CMD_SYSTEM_DATA,
     CMD_TIMER_INFO,
     CMD_WIFI_SSID,
+    CONF_LOCAL_API_PORT,
+    DEFAULT_LOCAL_API_PORT,
     DEFAULT_MEDIUM_POLL_INTERVAL,
     BACKOFF_INTERVALS,
     DEFAULT_POLL_INTERVAL,
@@ -464,6 +468,94 @@ class MarstekDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]):
 
         # Logs
         await self._safe_send_and_sleep(CMD_LOGS)
+
+    @property
+    def local_api_settings(self) -> tuple[bool, int] | None:
+        """Last acknowledged BLE write, not independently verified device state."""
+        return getattr(self, "_local_api_command_settings", None)
+
+    @property
+    def local_api_state_source(self) -> str:
+        """Describe the evidence for the exposed switch state."""
+        return getattr(
+            self,
+            "_local_api_state_source",
+            "Unknown: no acknowledged Bluetooth write in this session",
+        )
+
+    @property
+    def local_api_port(self) -> int:
+        """Configured command port, not independently read from the device."""
+        return self.config_entry.options.get(CONF_LOCAL_API_PORT, DEFAULT_LOCAL_API_PORT)
+
+    async def async_set_local_api(
+        self, *, enabled: bool | None = None, port: int | None = None
+    ) -> None:
+        """Send complete 0x28 writes and validate acknowledgement frames.
+
+        Never issue empty 0x28 status queries; writes acknowledge commands but
+        do not provide independent state readback.
+        """
+        if port is not None and (type(port) is not int or not 1 <= port <= 65535):
+            raise HomeAssistantError("Local API port must be an integer from 1 to 65535")
+        if enabled is not None and type(enabled) is not bool:
+            raise HomeAssistantError("Local API enabled must be a boolean")
+
+        async with self._poll_lock:
+            previous_setting = self.local_api_settings
+            requested_port = self.local_api_port if port is None else port
+
+            # Do not assume the enabled bit. Save a draft port without a BLE write.
+            if enabled is None and previous_setting is None:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    options={**self.config_entry.options, CONF_LOCAL_API_PORT: requested_port},
+                )
+                self.async_update_listeners()
+                return
+
+            target_enabled = previous_setting[0] if enabled is None else enabled
+            payload = struct.pack("<BH", target_enabled, requested_port)
+            previous_response = self.device.last_response
+            try:
+                # A boolean transport result does not validate the ACK.
+                await self.device.send_command(CMD_LOCAL_API_STATUS, payload)
+                response = self.device.last_response
+                accepted = {MarstekProtocol.build_command(CMD_LOCAL_API_STATUS, payload)}
+                if not target_enabled:
+                    # Tested Venus E 3.0 FW150 returns a valid empty disable ACK.
+                    accepted.add(MarstekProtocol.build_command(CMD_LOCAL_API_STATUS))
+                if response is previous_response or response not in accepted:
+                    raise HomeAssistantError(
+                        "Local API write lacks a fresh checksum-valid matching ACK; "
+                        "the device may still have applied the command"
+                    )
+            except Exception as err:
+                # A failed acknowledgement does not prove the old state persists.
+                self._local_api_command_settings = None
+                self._local_api_state_source = (
+                    "Unknown: last Bluetooth write was not acknowledged"
+                )
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    options={**self.config_entry.options, CONF_LOCAL_API_PORT: requested_port},
+                )
+                self.async_update_listeners()
+                if isinstance(err, HomeAssistantError):
+                    raise
+                raise HomeAssistantError(
+                    "Local API Bluetooth write failed; the device may still have applied it"
+                ) from err
+
+            self._local_api_command_settings = (target_enabled, requested_port)
+            self._local_api_state_source = (
+                "Last acknowledged Bluetooth write; no independent readback"
+            )
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                options={**self.config_entry.options, CONF_LOCAL_API_PORT: requested_port},
+            )
+            self.async_update_listeners()
 
     def _handle_notification(self, sender: int, data: bytearray) -> None:
         """Handle notification from device."""

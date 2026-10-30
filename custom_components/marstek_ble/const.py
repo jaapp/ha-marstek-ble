@@ -4,6 +4,8 @@ DOMAIN = "marstek_ble"
 
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_MEDIUM_POLL_INTERVAL = "medium_poll_interval"
+CONF_LOCAL_API_PORT = "local_api_port"
+DEFAULT_LOCAL_API_PORT = 30000
 
 # BLE Service and Characteristic UUIDs
 SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb"

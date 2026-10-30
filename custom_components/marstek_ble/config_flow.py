@@ -209,7 +209,9 @@ class MarstekBLEOptionsFlow(OptionsFlow):
         """Handle the options step."""
         if user_input is not None:
             _LOGGER.debug("Options updated: %s", user_input)
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(
+                title="", data={**self._config_entry.options, **user_input}
+            )
 
         current_fast_interval = self._config_entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL

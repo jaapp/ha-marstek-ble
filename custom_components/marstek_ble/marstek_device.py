@@ -669,11 +669,13 @@ class MarstekProtocol:
         payload: bytes, device_data: MarstekData, timestamp: float
     ) -> bool:
         """Parse local API status (0x28)."""
-        if len(payload) < 3:
+        if len(payload) != 3 or payload[0] not in (0, 1):
             return False
 
         enabled = "enabled" if payload[0] == 1 else "disabled"
         port = struct.unpack("<H", payload[1:3])[0]
+        if not port:
+            return False
         device_data.local_api_status = f"{enabled}/{port}"
 
         MarstekProtocol._track_field(
@@ -857,6 +859,11 @@ class MarstekBLEDevice:
                 self._expected_disconnect = True
                 await self._client.disconnect()
             self._disconnect_timer = None
+
+    @property
+    def last_response(self) -> bytes | None:
+        """Most recent command response; reset before each BLE write."""
+        return self._response_data
 
     async def send_command(
         self, cmd: int, payload: bytes = b"", retry: int = 3
